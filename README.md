@@ -3,6 +3,10 @@
 A KDE Plasma 6 widget showing the next departures for Montréal STM buses and
 metro, with live delays and bus occupancy.
 
+<p align="center">
+  <img src="docs/screenshot.png" alt="The widget on a desktop: métro and bus departures at downtown stops, with live delays, stops away, occupancy bars, and detour and cancellation notes" width="480">
+</p>
+
 Two parts:
 
 - **`transitd`** — a small Go service that reads STM's schedule (GTFS) and
@@ -26,7 +30,7 @@ Two parts:
       nearby stops, status; downloads and refreshes the schedule itself
 - [x] Plasmoid: panel view (next departure of your top route), full view
       per stop, settings page with address search
-- [ ] Screenshots
+- [x] Screenshot
 
 ## Try it
 
