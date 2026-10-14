@@ -3,7 +3,7 @@ package realtime
 import (
 	"time"
 
-	"stm-transit/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
 )
 
 // Snapshot is the latest trip updates and vehicle positions, indexed for

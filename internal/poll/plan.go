@@ -9,7 +9,7 @@ package poll
 import (
 	"time"
 
-	"stm-transit/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
 )
 
 // Watch is one stop and the routes the user follows there. An empty

@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"stm-transit/internal/gtfs/gtfstest"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs/gtfstest"
 )
 
 func loadFixture(t *testing.T) *Feed {

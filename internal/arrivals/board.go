@@ -7,8 +7,8 @@ import (
 	"sort"
 	"time"
 
-	"stm-transit/internal/gtfs"
-	"stm-transit/internal/realtime"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/realtime"
 )
 
 // Departure is one row on the board.

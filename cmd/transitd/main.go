@@ -24,12 +24,12 @@ import (
 	"strings"
 	"time"
 
-	"stm-transit/internal/arrivals"
-	"stm-transit/internal/config"
-	"stm-transit/internal/geo"
-	"stm-transit/internal/gtfs"
-	"stm-transit/internal/poll"
-	"stm-transit/internal/realtime"
+	"github.com/TCurrie11/stm_tracker_widget/internal/arrivals"
+	"github.com/TCurrie11/stm_tracker_widget/internal/config"
+	"github.com/TCurrie11/stm_tracker_widget/internal/geo"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/poll"
+	"github.com/TCurrie11/stm_tracker_widget/internal/realtime"
 )
 
 // cfg is loaded once in main; the CLI uses the first agency.

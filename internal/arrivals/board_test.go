@@ -6,9 +6,9 @@ import (
 	"testing"
 	"time"
 
-	"stm-transit/internal/gtfs"
-	"stm-transit/internal/gtfs/gtfstest"
-	"stm-transit/internal/realtime"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs/gtfstest"
+	"github.com/TCurrie11/stm_tracker_widget/internal/realtime"
 )
 
 // The fixture's route 24 Est leaves stop 52345 (stop_sequence 10) at

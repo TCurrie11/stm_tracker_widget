@@ -9,7 +9,7 @@ import (
 	"fmt"
 	"time"
 
-	"stm-transit/internal/pb"
+	"github.com/TCurrie11/stm_tracker_widget/internal/pb"
 )
 
 // StopRelationship is StopTimeUpdate.ScheduleRelationship.

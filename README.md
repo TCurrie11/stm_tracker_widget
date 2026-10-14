@@ -1,4 +1,4 @@
-# stm-transit
+# stm_tracker_widget
 
 A KDE Plasma 6 widget showing the next departures for Montréal STM buses and
 metro, with live delays and bus occupancy.

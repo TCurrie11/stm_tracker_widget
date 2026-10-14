@@ -4,8 +4,8 @@ import (
 	"testing"
 	"time"
 
-	"stm-transit/internal/gtfs"
-	"stm-transit/internal/gtfs/gtfstest"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
+	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs/gtfstest"
 )
 
 func feed(t *testing.T) *gtfs.Feed {
