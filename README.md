@@ -14,6 +14,49 @@ Two parts:
 - **the plasmoid** (`package/`) — plain QML that displays that JSON. No
   transit logic, no C++ plugin.
 
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph computer["Your computer"]
+        subgraph widget["Plasma widget · QML"]
+            views["Panel and popup views<br/>countdown ticks locally every 15 s"]
+            settings["Settings page<br/>find stops, pick routes"]
+        end
+        subgraph transitd["transitd · Go service on 127.0.0.1:8765"]
+            api["HTTP API<br/><i>server</i>"]
+            board["Departure board<br/><i>arrivals</i>"]
+            schedule["Schedule in memory<br/><i>gtfs</i>"]
+            planner["Polling plan<br/><i>poll</i>"]
+            fetcher["Live data: fetch and decode<br/><i>realtime, pb</i>"]
+        end
+    end
+    subgraph internet["Internet"]
+        stmzip[("STM schedule<br/>GTFS zip")]
+        stmrt[("STM live feeds<br/>GTFS-Realtime")]
+        osm[("OpenStreetMap<br/>Nominatim")]
+    end
+
+    views -- "GET /v1/departures<br/>every 60 s" --> api
+    settings -- "stop search, stations" --> api
+    api --> board
+    board -- "scheduled times" --> schedule
+    board -- "latest snapshot" --> fetcher
+    planner -- "when buses run soon<br/>and the widget is open" --> fetcher
+    planner -. "checks the timetable" .-> schedule
+    fetcher -- "protobuf · API key<br/>≤ 9,500 requests a day" --> stmrt
+    schedule -- "re-downloaded weekly" --> stmzip
+    api -- "address lookup" --> osm
+```
+
+The widget never talks to STM. Every 60 seconds it asks `transitd` for the
+stops it shows, and the service answers from memory: the schedule it keeps
+loaded, merged with the latest live snapshot. One background loop fetches
+the live feeds, and only when it's worth it: a widget has asked recently and
+a bus on a watched route leaves soon. Overnight, or with the widget closed,
+it makes no requests at all. That keeps the API key on one machine and
+usage far below STM's daily limit, however many widgets are open.
+
 ## Status
 
 - [x] Static schedule loader: next departures per route and direction,
@@ -30,7 +73,7 @@ Two parts:
       nearby stops, status; downloads and refreshes the schedule itself
 - [x] Plasmoid: panel view (next departure of your top route), full view
       per stop, settings page with address search
-- [x] Screenshot
+- [x] Screenshot and architecture diagram
 
 ## Try it
 
