@@ -33,6 +33,31 @@ GridLayout {
     property bool wide: true
 
     readonly property var departures: app.visibleDepartures(group)
+    // Cells show only buses that will stop here, never more than the
+    // configured number, so a long detour can't push the row off the edge.
+    readonly property var catchable: departures.filter(departure => !isGone(departure)).slice(0, Math.max(1, app.perDirection))
+    // Canceled or detoured runs before the last bus shown, summarised in
+    // one line instead of a cell each.
+    readonly property var missed: {
+        const last = catchable.length > 0 ? catchable[catchable.length - 1].expected : null;
+        return departures.filter(departure => isGone(departure) && (last === null || departure.expected < last));
+    }
+    readonly property string missedText: {
+        const canceled = missed.filter(departure => departure.status === "canceled");
+        const skipped = missed.filter(departure => departure.status === "skipped");
+        let parts = [];
+        if (skipped.length === 1) {
+            parts.push(i18n("%1 not stopping here (detour)", app.formatClock(skipped[0].scheduled)));
+        } else if (skipped.length > 1) {
+            parts.push(i18np("%1 bus not stopping here (detour)", "%1 buses not stopping here (detour)", skipped.length));
+        }
+        if (canceled.length === 1) {
+            parts.push(i18n("%1 canceled", app.formatClock(canceled[0].scheduled)));
+        } else if (canceled.length > 1) {
+            parts.push(i18np("%1 canceled", "%1 canceled", canceled.length));
+        }
+        return parts.join(" · ");
+    }
     readonly property real headsignWidth: Kirigami.Units.gridUnit * 9
     // Same width in every row so the columns line up; shrinks when narrow.
     readonly property real cellWidth: {
@@ -64,17 +89,35 @@ GridLayout {
         }
     }
 
-    RowLayout {
-        spacing: Kirigami.Units.largeSpacing
+    ColumnLayout {
+        spacing: Kirigami.Units.smallSpacing
         Layout.fillWidth: true
 
-        Repeater {
-            model: row.departures
-            delegate: departureCell
+        RowLayout {
+            visible: row.catchable.length > 0
+            spacing: Kirigami.Units.largeSpacing
+            Layout.fillWidth: true
+
+            Repeater {
+                model: row.catchable
+                delegate: departureCell
+            }
+            Item {
+                Layout.fillWidth: true
+            }
         }
-        Item {
+        PlasmaComponents.Label {
+            visible: row.missedText !== ""
+            text: row.missedText
+            font: Kirigami.Theme.smallFont
+            color: Kirigami.Theme.neutralTextColor
+            wrapMode: Text.Wrap
             Layout.fillWidth: true
         }
+    }
+
+    function isGone(departure) {
+        return departure.status === "canceled" || departure.status === "skipped";
     }
 
     Component {
@@ -85,7 +128,6 @@ GridLayout {
 
             required property var modelData
             readonly property var departure: modelData
-            readonly property bool gone: departure.status === "canceled" || departure.status === "skipped"
 
             spacing: 0
             Layout.alignment: Qt.AlignTop
@@ -98,13 +140,12 @@ GridLayout {
                 PlasmaComponents.Label {
                     text: row.app.countdown(cell.departure)
                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.4
-                    font.bold: !cell.gone
-                    font.strikeout: cell.gone
+                    font.bold: true
                     color: row.app.statusColor(cell.departure.status)
                 }
                 OccupancyBar {
                     level: cell.departure.occupancy
-                    visible: row.app.showOccupancy && cell.departure.occupancy > 0 && !cell.gone
+                    visible: row.app.showOccupancy && cell.departure.occupancy > 0
                     Layout.alignment: Qt.AlignVCenter
                 }
             }
@@ -113,11 +154,10 @@ GridLayout {
                 font: Kirigami.Theme.smallFont
                 color: row.app.statusColor(cell.departure.status)
                 elide: Text.ElideRight
-                wrapMode: cell.gone ? Text.Wrap : Text.NoWrap
                 Layout.fillWidth: true
             }
             PlasmaComponents.Label {
-                visible: text !== "" && !cell.gone
+                visible: text !== ""
                 text: row.app.stopsText(cell.departure)
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7
