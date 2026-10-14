@@ -2,6 +2,7 @@ package gtfs
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/csv"
 	"errors"
 	"fmt"
@@ -261,4 +262,13 @@ func ParseGTFSTime(s string) (int32, error) {
 		return 0, fmt.Errorf("bad time %q", s)
 	}
 	return int32(n[0]*3600 + n[1]*60 + n[2]), nil
+}
+
+// LoadBytes reads a GTFS zip held in memory.
+func LoadBytes(b []byte, loc *time.Location) (*Feed, error) {
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
+		return nil, fmt.Errorf("open gtfs zip: %w", err)
+	}
+	return load(zr, loc)
 }

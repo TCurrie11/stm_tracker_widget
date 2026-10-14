@@ -1,0 +1,20 @@
+{
+  "listen": "127.0.0.1:8765",
+  "poll_interval": "60s",
+  "wake_lead": "30m",
+  "idle_after": "10m",
+  "geocoder": { "provider": "nominatim", "contact": "you@example.com" },
+  "agencies": [
+    {
+      "id": "stm",
+      "name": "Société de transport de Montréal",
+      "timezone": "America/Montreal",
+      "gtfs_url": "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip",
+      "trip_updates_url": "FILL IN FROM THE STM DEVELOPER PORTAL",
+      "vehicle_positions_url": "FILL IN FROM THE STM DEVELOPER PORTAL",
+      "api_key_header": "FILL IN (header name from the portal docs)",
+      "api_key_env": "STM_API_KEY",
+      "daily_request_limit": 10000
+    }
+  ]
+}

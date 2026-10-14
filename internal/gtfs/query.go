@@ -1,6 +1,7 @@
 package gtfs
 
 import (
+	"math"
 	"sort"
 	"strings"
 	"time"
@@ -216,6 +217,57 @@ func (f *Feed) SearchStops(query string, limit int) []*Stop {
 	if limit > 0 && len(out) > limit {
 		out = out[:limit]
 	}
+	return out
+}
+
+// NearbyStop is a stop with its distance from a search point.
+type NearbyStop struct {
+	*Stop
+	Meters float64
+}
+
+// NearbyStops returns stops and stations within radius meters of a point,
+// closest first. Metro platforms are folded into their station.
+func (f *Feed) NearbyStops(lat, lon, radius float64, limit int) []NearbyStop {
+	var out []NearbyStop
+	for _, s := range f.Stops {
+		if s.Parent != "" {
+			continue
+		}
+		if d := distance(lat, lon, s.Lat, s.Lon); d <= radius {
+			out = append(out, NearbyStop{s, d})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Meters < out[j].Meters })
+	if limit > 0 && len(out) > limit {
+		out = out[:limit]
+	}
+	return out
+}
+
+// distance is the great-circle distance in meters.
+func distance(lat1, lon1, lat2, lon2 float64) float64 {
+	const r = 6371000
+	rad := math.Pi / 180
+	dLat, dLon := (lat2-lat1)*rad, (lon2-lon1)*rad
+	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 2 * r * math.Asin(math.Sqrt(a))
+}
+
+// RoutesAt lists the routes serving a stop or station, for the settings page.
+func (f *Feed) RoutesAt(stopID string) []Route {
+	seen := map[int32]bool{}
+	for _, sid := range append([]string{stopID}, f.children[stopID]...) {
+		for _, st := range f.byStop[sid] {
+			seen[f.trips[st.tripIdx].routeIdx] = true
+		}
+	}
+	out := make([]Route, 0, len(seen))
+	for i := range seen {
+		out = append(out, f.Routes[i])
+	}
+	sort.Slice(out, func(i, j int) bool { return lessRouteName(out[i].ShortName, out[j].ShortName) })
 	return out
 }
 
