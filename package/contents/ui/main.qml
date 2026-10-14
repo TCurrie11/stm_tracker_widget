@@ -10,6 +10,7 @@
 import QtQuick
 
 import org.kde.plasma.plasmoid
+import org.kde.plasma.core as PlasmaCore
 import org.kde.kirigami as Kirigami
 
 import "api.js" as Api
@@ -70,6 +71,10 @@ PlasmoidItem {
         }
         return best;
     }
+
+    // On the desktop, the background can be switched off from the widget's
+    // edit-mode toolbar ("Show Background"); Plasma saves the choice.
+    Plasmoid.backgroundHints: PlasmaCore.Types.DefaultBackground | PlasmaCore.Types.ConfigurableBackground
 
     switchWidth: Kirigami.Units.gridUnit * 12
     switchHeight: Kirigami.Units.gridUnit * 10
