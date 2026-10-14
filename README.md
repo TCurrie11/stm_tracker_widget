@@ -146,4 +146,27 @@ standing room). Two details of STM's feed that the code relies on:
   out of sequence order, so nothing assumes the list is sorted;
 - the metro has no realtime data, so metro times are always "scheduled".
 
-Data © Société de transport de Montréal, CC BY 4.0.
+## Project layout
+
+```
+cmd/transitd/        command line: `serve` plus terminal tools (search, next, live…)
+internal/
+  gtfs/              static schedule: loading the GTFS zip, next-departure queries
+  pb/                minimal protobuf reader (no generated code or dependencies)
+  realtime/          GTFS-Realtime decoding, polite fetching, matching to the schedule
+  arrivals/          the departure board: schedule and live data merged
+  poll/              when live data is worth fetching
+  server/            the background service and its JSON API
+  config/, geo/      settings and address lookup
+package/             the Plasma 6 widget (QML)
+examples/            sample config and systemd user unit
+```
+
+`transitd version` prints the version (currently 0.1.0).
+
+## License
+
+GPL-2.0-or-later, see [LICENSE](LICENSE). Author:
+[TCurrie11](https://github.com/TCurrie11).
+
+Transit data © Société de transport de Montréal, CC BY 4.0.
