@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<kcfg xmlns="http://www.kde.org/standards/kcfg/1.0"
+      xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+      xsi:schemaLocation="http://www.kde.org/standards/kcfg/1.0
+      http://www.kde.org/standards/kcfg/1.0/kcfg.xsd">
+  <kcfgfile name=""/>
+
+  <group name="General">
+    <entry name="serviceUrl" type="String">
+      <label>Address of the transitd service</label>
+      <default>http://127.0.0.1:8765</default>
+    </entry>
+    <!-- JSON list, in display order; the first is shown in the panel:
+         [{"stop":"52345","stopName":"…","routes":["24"],"metro":false}]
+         routes [] means every route at the stop. -->
+    <entry name="watches" type="String">
+      <label>Stops and routes to show</label>
+      <default>[]</default>
+    </entry>
+    <entry name="refreshSeconds" type="Int">
+      <label>Seconds between updates</label>
+      <default>60</default>
+      <min>30</min>
+      <max>600</max>
+    </entry>
+    <entry name="departuresPerDirection" type="Int">
+      <label>Departures shown per direction</label>
+      <default>3</default>
+      <min>1</min>
+      <max>5</max>
+    </entry>
+    <entry name="earlyColor" type="String">
+      <label>Colour for early departures: orange or green</label>
+      <default>orange</default>
+    </entry>
+    <entry name="showOccupancy" type="Bool">
+      <label>Show how full buses are</label>
+      <default>true</default>
+    </entry>
+    <entry name="address" type="String">
+      <label>Last address searched in the settings</label>
+      <default></default>
+    </entry>
+  </group>
+</kcfg>

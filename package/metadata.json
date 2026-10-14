@@ -1,0 +1,15 @@
+{
+    "KPlugin": {
+        "Id": "io.github.tcurrie11.stmtransit",
+        "Name": "STM Transit",
+        "Description": "Next bus and métro departures with live delays",
+        "Icon": "preferences-system-network",
+        "Category": "Online Services",
+        "Version": "0.1",
+        "License": "GPL-2.0-or-later",
+        "Website": "https://github.com/TCurrie11/stm_tracker_widget",
+        "Authors": [{ "Name": "Thomas Currie" }]
+    },
+    "KPackageStructure": "Plasma/Applet",
+    "X-Plasma-API-Minimum-Version": "6.0"
+}
