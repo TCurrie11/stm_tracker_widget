@@ -1,6 +1,8 @@
 // Command transitd is the local backend for the STM transit widget.
 //
-// For now it is a CLI for exploring the static schedule:
+//	transitd serve                      run the background service the widget talks to
+//
+// The other commands explore the schedule and live data from a terminal:
 //
 //	transitd fetch                      download STM's schedule data
 //	transitd search berri               find stop / station IDs by name or code
@@ -15,13 +17,17 @@ package main
 
 import (
 	"context"
+	"errors"
 	"flag"
 	"fmt"
-	"io"
+	"log"
+	"net"
 	"net/http"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/TCurrie11/stm_tracker_widget/internal/arrivals"
@@ -30,6 +36,7 @@ import (
 	"github.com/TCurrie11/stm_tracker_widget/internal/gtfs"
 	"github.com/TCurrie11/stm_tracker_widget/internal/poll"
 	"github.com/TCurrie11/stm_tracker_widget/internal/realtime"
+	"github.com/TCurrie11/stm_tracker_widget/internal/server"
 )
 
 // cfg is loaded once in main; the CLI uses the first agency.
@@ -47,6 +54,8 @@ func main() {
 		os.Exit(1)
 	}
 	switch os.Args[1] {
+	case "serve":
+		err = cmdServe(os.Args[2:])
 	case "fetch":
 		err = cmdFetch(os.Args[2:])
 	case "search":
@@ -70,6 +79,7 @@ func main() {
 
 func usage() {
 	fmt.Fprintln(os.Stderr, `usage:
+  transitd serve  [-gtfs FILE] [-listen 127.0.0.1:8765]
   transitd fetch [-url URL]
   transitd search [-gtfs FILE] <name or stop code>
   transitd next   [-gtfs FILE] -stop ID [-routes 24,165] [-n 3] [-at 2026-10-12T08:00]
@@ -94,35 +104,91 @@ func cmdFetch(args []string) error {
 	out := fs.String("o", defaultGTFSPath(), "where to save it")
 	fs.Parse(args)
 
-	if err := os.MkdirAll(filepath.Dir(*out), 0o755); err != nil {
-		return err
-	}
-	resp, err := http.Get(*url)
+	n, err := gtfs.Download(context.Background(), *url, *out)
 	if err != nil {
-		return err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("download: %s", resp.Status)
-	}
-	// Write to a temp file and rename, so a failed download never leaves a
-	// half-written zip where the service expects a good one.
-	tmp, err := os.CreateTemp(filepath.Dir(*out), "gtfs-*.zip")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	n, err := io.Copy(tmp, resp.Body)
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
-	}
-	if err != nil {
-		return err
-	}
-	if err := os.Rename(tmp.Name(), *out); err != nil {
 		return err
 	}
 	fmt.Printf("saved %.1f MB to %s\n", float64(n)/1e6, *out)
+	return nil
+}
+
+// gtfsMaxAge is when the service re-downloads the schedule. STM publishes
+// a new zip every few weeks; a weekly check keeps up without being wasteful.
+const gtfsMaxAge = 7 * 24 * time.Hour
+
+func cmdServe(args []string) error {
+	fs := flag.NewFlagSet("serve", flag.ExitOnError)
+	path := fs.String("gtfs", defaultGTFSPath(), "GTFS zip (downloaded if missing)")
+	listen := fs.String("listen", cfg.Listen, "address to listen on (loopback only)")
+	fs.Parse(args)
+	if err := checkLoopback(*listen); err != nil {
+		return err
+	}
+
+	a := agency()
+	loc, err := time.LoadLocation(a.Timezone)
+	if err != nil {
+		return err
+	}
+	logger := log.New(os.Stderr, "", 0) // journald adds timestamps
+	if isTerminal() {
+		logger.SetFlags(log.LstdFlags)
+	}
+	svc := &server.Service{
+		Agency:       a,
+		PollInterval: cfg.PollInterval.D(),
+		WakeLead:     cfg.WakeLead.D(),
+		IdleAfter:    cfg.IdleAfter.D(),
+		GTFSPath:     *path,
+		GTFSMaxAge:   gtfsMaxAge,
+		Geocoder:     newGeocoder(),
+		Log:          logger,
+	}
+	if a.TripUpdatesURL != "" {
+		svc.Fetcher = newFetcher(loc)
+		if a.Key() == "" {
+			logger.Printf("no API key (set %s): serving schedule times only", a.APIKeyEnv)
+		}
+	}
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	ln, err := net.Listen("tcp", *listen)
+	if err != nil {
+		return err
+	}
+	srv := &http.Server{
+		Handler:           svc.Handler(),
+		ReadHeaderTimeout: 5 * time.Second,
+	}
+	go svc.Run(ctx)
+	go func() {
+		<-ctx.Done()
+		sctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		srv.Shutdown(sctx)
+	}()
+	logger.Printf("listening on http://%s", ln.Addr())
+	if err := srv.Serve(ln); !errors.Is(err, http.ErrServerClosed) {
+		return err
+	}
+	logger.Printf("stopped")
+	return nil
+}
+
+// checkLoopback refuses to listen beyond this machine: the API has no
+// authentication and the service spends the user's API quota.
+func checkLoopback(addr string) error {
+	host, _, err := net.SplitHostPort(addr)
+	if err != nil {
+		return fmt.Errorf("listen address %q: %w", addr, err)
+	}
+	if host == "localhost" {
+		return nil
+	}
+	if ip := net.ParseIP(host); ip == nil || !ip.IsLoopback() {
+		return fmt.Errorf("listen address %q: only loopback addresses (127.0.0.1, ::1, localhost) are allowed", addr)
+	}
 	return nil
 }
 

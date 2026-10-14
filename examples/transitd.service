@@ -1,0 +1,22 @@
+# systemd user service for transitd. Install with:
+#
+#   go build -o ~/.local/bin/transitd ./cmd/transitd
+#   cp examples/transitd.service ~/.config/systemd/user/
+#   systemctl --user enable --now transitd
+#
+# Logs: journalctl --user -u transitd -f
+
+[Unit]
+Description=STM transit widget backend
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+ExecStart=%h/.local/bin/transitd serve
+# STM_API_KEY=... ; the leading '-' lets it run schedule-only without one.
+EnvironmentFile=-%h/.config/stm-transit/secrets.env
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=default.target

@@ -21,13 +21,15 @@ Two parts:
       decoded with a small hand-written protobuf reader (no dependencies)
 - [x] Request budget (stops before STM's daily limit), backoff on errors,
       API key kept out of logs
-- [ ] HTTP API and nearby-stop search
+- [x] HTTP API on localhost (`transitd serve`): departures, stop search,
+      nearby stops, status; downloads and refreshes the schedule itself
 - [ ] Plasmoid
 
 ## Try it
 
 ```sh
 go build -o transitd ./cmd/transitd
+./transitd serve                          # the service (see below)
 ./transitd fetch                          # downloads STM's schedule data
 ./transitd search berri                   # find stop/station IDs
 ./transitd next -stop <ID> -routes 24 -n 3
@@ -35,6 +37,60 @@ go build -o transitd ./cmd/transitd
 ./transitd plan -stop <ID> -routes 24     # would it poll right now?
 ./transitd live -stop <ID> -routes 24     # next departures with live data
 ```
+
+## Running the service
+
+```sh
+go build -o ~/.local/bin/transitd ./cmd/transitd
+cp examples/transitd.service ~/.config/systemd/user/
+systemctl --user enable --now transitd
+journalctl --user -u transitd -f
+```
+
+It listens on `127.0.0.1:8765` and only answers requests addressed to
+localhost. On first start it downloads the schedule (about 45 MB), and
+again when the copy is a week old.
+
+Polling follows the widget: STM is only asked for live data while the
+widget is requesting a stop, there is service on the watched routes within
+`wake_lead`, and the day's request budget isn't spent. With the widget closed
+for `idle_after`, or overnight, the service makes no requests at all.
+
+### API
+
+All responses are JSON; errors are `{"error": "..."}` (503 while the
+schedule is still loading). Times are ISO 8601 with the agency's offset.
+
+| Request | Returns |
+| --- | --- |
+| `GET /v1/departures?stop=ID&routes=24,165&n=3` | the board: next `n` per route and direction |
+| `GET /v1/stops?q=berri` | stops and stations by name or sign number |
+| `GET /v1/stops/nearby?address=1500 rue Berri&radius=500` | stops near an address (or `lat=&lon=`) |
+| `GET /v1/status` | schedule, polling state, last error, requests used today |
+
+A departure looks like:
+
+```json
+{
+  "trip_id": "301004275",
+  "scheduled": "2026-10-14T12:36:00-04:00",
+  "expected": "2026-10-14T12:39:39-04:00",
+  "minutes": 20,
+  "status": "late",
+  "delay_seconds": 219,
+  "realtime": true,
+  "frequency": false,
+  "stops_away": 14,
+  "occupancy": 2
+}
+```
+
+`status` is `scheduled`, `on_time`, `late`, `early`, `canceled` or
+`skipped` (detour). `frequency` marks metro times, which are "a train about
+every N minutes". `stops_away` is null when unknown; `occupancy` is 0
+(unknown) to 3 (standing room). The response's `live.state` is `live` or
+`schedule`, and `live.note` says why live data is missing ("no service
+until 05:30", "API key rejected"). The widget must show `credits`.
 
 ## Configuration
 

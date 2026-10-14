@@ -15,6 +15,9 @@ import (
 type Departure struct {
 	realtime.Estimate
 	TripID string
+	// Frequency marks headway-based service (the metro): Expected is "a
+	// train about every N minutes", not a particular vehicle.
+	Frequency bool
 }
 
 // Group is one route in one direction.
@@ -46,7 +49,7 @@ func Board(f *gtfs.Feed, snap *realtime.Snapshot, stop string, routes []string,
 			if e.Departed || e.Expected.Before(now) {
 				continue
 			}
-			deps = append(deps, Departure{Estimate: e, TripID: d.TripID})
+			deps = append(deps, Departure{Estimate: e, TripID: d.TripID, Frequency: d.FromFrequency})
 		}
 		// A late bus can now be due after the next one; show them in the
 		// order they'll actually arrive.
