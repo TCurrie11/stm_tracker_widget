@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/geo/geo.go
+// Purpose: Turns addresses into coordinates (OpenStreetMap or Google).
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package geo turns addresses into coordinates. The rest of the service
 // only sees the Geocoder interface, so the provider is a config choice.
 package geo
@@ -48,13 +59,13 @@ type Nominatim struct {
 	Bias    Bias
 	Client  *http.Client
 
-	mu   sync.Mutex
-	last time.Time
+	mu          sync.Mutex
+	lastRequest time.Time
 }
 
 func (n *Nominatim) Geocode(ctx context.Context, address string) (Place, error) {
 	n.mu.Lock()
-	if wait := time.Second - time.Since(n.last); wait > 0 {
+	if wait := time.Second - time.Since(n.lastRequest); wait > 0 {
 		select {
 		case <-time.After(wait):
 		case <-ctx.Done():
@@ -62,44 +73,44 @@ func (n *Nominatim) Geocode(ctx context.Context, address string) (Place, error) 
 			return Place{}, ctx.Err()
 		}
 	}
-	n.last = time.Now()
+	n.lastRequest = time.Now()
 	n.mu.Unlock()
 
 	base := n.BaseURL
 	if base == "" {
 		base = "https://nominatim.openstreetmap.org"
 	}
-	q := url.Values{
+	query := url.Values{
 		"q": {address}, "format": {"jsonv2"}, "limit": {"1"},
 		"viewbox": {fmt.Sprintf("%f,%f,%f,%f", n.Bias.MinLon, n.Bias.MaxLat, n.Bias.MaxLon, n.Bias.MinLat)},
 		"bounded": {"1"},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/search?"+q.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/search?"+query.Encode(), nil)
 	if err != nil {
 		return Place{}, err
 	}
-	ua := "stm-transit-widget/0.1"
+	userAgent := "stm-transit-widget/0.1"
 	if n.Contact != "" {
-		ua += " (" + n.Contact + ")"
+		userAgent += " (" + n.Contact + ")"
 	}
-	req.Header.Set("User-Agent", ua)
+	req.Header.Set("User-Agent", userAgent)
 
-	var res []struct {
+	var results []struct {
 		Lat, Lon    string
 		DisplayName string `json:"display_name"`
 	}
-	if err := getJSON(n.Client, req, &res); err != nil {
+	if err := getJSON(n.Client, req, &results); err != nil {
 		return Place{}, fmt.Errorf("nominatim: %w", err)
 	}
-	if len(res) == 0 {
+	if len(results) == 0 {
 		return Place{}, ErrNotFound
 	}
-	lat, err1 := strconv.ParseFloat(res[0].Lat, 64)
-	lon, err2 := strconv.ParseFloat(res[0].Lon, 64)
+	lat, err1 := strconv.ParseFloat(results[0].Lat, 64)
+	lon, err2 := strconv.ParseFloat(results[0].Lon, 64)
 	if err1 != nil || err2 != nil {
-		return Place{}, fmt.Errorf("nominatim: bad coordinates %q,%q", res[0].Lat, res[0].Lon)
+		return Place{}, fmt.Errorf("nominatim: bad coordinates %q,%q", results[0].Lat, results[0].Lon)
 	}
-	return Place{Lat: lat, Lon: lon, Label: res[0].DisplayName}, nil
+	return Place{Lat: lat, Lon: lon, Label: results[0].DisplayName}, nil
 }
 
 // ---- Google Geocoding API, optional ----
@@ -118,15 +129,15 @@ func (g *Google) Geocode(ctx context.Context, address string) (Place, error) {
 	if base == "" {
 		base = "https://maps.googleapis.com"
 	}
-	q := url.Values{
+	query := url.Values{
 		"address": {address}, "key": {g.Key},
 		"bounds": {fmt.Sprintf("%f,%f|%f,%f", g.Bias.MinLat, g.Bias.MinLon, g.Bias.MaxLat, g.Bias.MaxLon)},
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/maps/api/geocode/json?"+q.Encode(), nil)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, base+"/maps/api/geocode/json?"+query.Encode(), nil)
 	if err != nil {
 		return Place{}, err
 	}
-	var res struct {
+	var response struct {
 		Status  string
 		Results []struct {
 			FormattedAddress string `json:"formatted_address"`
@@ -136,25 +147,25 @@ func (g *Google) Geocode(ctx context.Context, address string) (Place, error) {
 		}
 		ErrorMessage string `json:"error_message"`
 	}
-	if err := getJSON(g.Client, req, &res); err != nil {
+	if err := getJSON(g.Client, req, &response); err != nil {
 		return Place{}, fmt.Errorf("google geocode: %w", err)
 	}
-	switch res.Status {
+	switch response.Status {
 	case "OK":
 	case "ZERO_RESULTS":
 		return Place{}, ErrNotFound
 	default:
-		return Place{}, fmt.Errorf("google geocode: %s %s", res.Status, res.ErrorMessage)
+		return Place{}, fmt.Errorf("google geocode: %s %s", response.Status, response.ErrorMessage)
 	}
-	r := res.Results[0]
-	return Place{Lat: r.Geometry.Location.Lat, Lon: r.Geometry.Location.Lng, Label: r.FormattedAddress}, nil
+	best := response.Results[0]
+	return Place{Lat: best.Geometry.Location.Lat, Lon: best.Geometry.Location.Lng, Label: best.FormattedAddress}, nil
 }
 
-func getJSON(c *http.Client, req *http.Request, v any) error {
-	if c == nil {
-		c = &http.Client{Timeout: 10 * time.Second}
+func getJSON(client *http.Client, req *http.Request, target any) error {
+	if client == nil {
+		client = &http.Client{Timeout: 10 * time.Second}
 	}
-	resp, err := c.Do(req)
+	resp, err := client.Do(req)
 	if err != nil {
 		return err
 	}
@@ -162,5 +173,5 @@ func getJSON(c *http.Client, req *http.Request, v any) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %s", resp.Status)
 	}
-	return json.NewDecoder(resp.Body).Decode(v)
+	return json.NewDecoder(resp.Body).Decode(target)
 }

@@ -1,6 +1,19 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/realtime/feed_test.go
+// Purpose: Tests for GTFS-Realtime decoding against captured STM feeds.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package realtime
 
 import (
+	"github.com/TCurrie11/stm_tracker_widget/internal/pb"
+
 	"compress/gzip"
 	"io"
 	"os"
@@ -93,7 +106,7 @@ func TestDecodeSTMVehiclePositions(t *testing.T) {
 	}
 	v := f.Vehicles[0]
 	if v.VehicleID != "40068" || v.TripID != "301713392" || v.RouteID != "496" ||
-		v.CurrentSeq != 22 || v.StopID != "61330" || v.Occupancy != StandingRoomOnly {
+		v.CurrentSequence != 22 || v.StopID != "61330" || v.Occupancy != StandingRoomOnly {
 		t.Errorf("first vehicle %+v", v)
 	}
 }
@@ -121,6 +134,19 @@ func TestOccupancyLevel(t *testing.T) {
 	} {
 		if got := o.Level(); got != want {
 			t.Errorf("%v: level %d, want %d", o, got, want)
+		}
+	}
+}
+
+// A DUPLICATED trip (6) is an extra run, not a cancellation; CANCELED (3)
+// and DELETED (7) both mean it won't run.
+func TestTripDescriptorScheduleRelationship(t *testing.T) {
+	for relationship, wantCanceled := range map[byte]bool{0: false, 3: true, 6: false, 7: true} {
+		// field 4 (schedule_relationship), wire type varint
+		message := []byte{tripDescriptorScheduleRelationship<<3 | 0, relationship}
+		_, _, _, _, canceled, err := tripDescriptor(pb.NewReader(message))
+		if err != nil || canceled != wantCanceled {
+			t.Errorf("relationship %d: canceled=%v err=%v, want canceled=%v", relationship, canceled, err, wantCanceled)
 		}
 	}
 }

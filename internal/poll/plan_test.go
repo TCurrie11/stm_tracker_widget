@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/poll/plan_test.go
+// Purpose: Tests for the polling plan.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package poll
 
 import (
@@ -19,7 +30,7 @@ func feed(t *testing.T) *gtfs.Feed {
 }
 
 func at(f *gtfs.Feed, s string) time.Time {
-	t, err := time.ParseInLocation("2006-01-02 15:04", s, f.Loc)
+	t, err := time.ParseInLocation("2006-01-02 15:04", s, f.TimeZone)
 	if err != nil {
 		panic(err)
 	}
@@ -58,7 +69,7 @@ func TestDecide(t *testing.T) {
 				t.Fatalf("active = %v, want %v (%s)", p.Active, c.active, p.Reason)
 			}
 			if !c.active && !p.WakeAt.Equal(at(f, c.wake)) {
-				t.Errorf("wake = %s, want %s (%s)", p.WakeAt.In(f.Loc).Format("2006-01-02 15:04"), c.wake, p.Reason)
+				t.Errorf("wake = %s, want %s (%s)", p.WakeAt.In(f.TimeZone).Format("2006-01-02 15:04"), c.wake, p.Reason)
 			}
 		})
 	}

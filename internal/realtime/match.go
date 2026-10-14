@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/realtime/match.go
+// Purpose: Matches live predictions to scheduled departures.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package realtime
 
 import (
@@ -9,36 +20,36 @@ import (
 // Snapshot is the latest trip updates and vehicle positions, indexed for
 // lookup by trip. Either feed may be missing.
 type Snapshot struct {
-	FeedTime time.Time
-	trips    map[tripKey]*TripUpdate
-	vehicles map[tripKey]*VehiclePosition
+	FeedTime      time.Time
+	updatesByRun  map[tripRun]*TripUpdate
+	vehiclesByRun map[tripRun]*VehiclePosition
 }
 
-// tripKey identifies one run of a trip: the same trip_id runs every day.
-type tripKey struct{ trip, date string }
+// tripRun identifies one run of a trip: the same trip_id runs every day.
+type tripRun struct{ tripID, serviceDate string }
 
 // NewSnapshot indexes decoded feeds. Pass nil for a feed you don't have.
 func NewSnapshot(tripUpdates, vehiclePositions *Feed) *Snapshot {
-	s := &Snapshot{trips: map[tripKey]*TripUpdate{}, vehicles: map[tripKey]*VehiclePosition{}}
+	snapshot := &Snapshot{updatesByRun: map[tripRun]*TripUpdate{}, vehiclesByRun: map[tripRun]*VehiclePosition{}}
 	if tripUpdates != nil {
-		s.FeedTime = Time(tripUpdates.Timestamp)
+		snapshot.FeedTime = Time(tripUpdates.Timestamp)
 		for i := range tripUpdates.Trips {
-			tu := &tripUpdates.Trips[i]
-			s.trips[tripKey{tu.TripID, tu.StartDate}] = tu
+			update := &tripUpdates.Trips[i]
+			snapshot.updatesByRun[tripRun{update.TripID, update.StartDate}] = update
 		}
 	}
 	if vehiclePositions != nil {
-		if t := Time(vehiclePositions.Timestamp); s.FeedTime.IsZero() || t.Before(s.FeedTime) {
-			s.FeedTime = t // report the older of the two
+		if positionsTime := Time(vehiclePositions.Timestamp); snapshot.FeedTime.IsZero() || positionsTime.Before(snapshot.FeedTime) {
+			snapshot.FeedTime = positionsTime // report the older of the two
 		}
 		for i := range vehiclePositions.Vehicles {
-			vp := &vehiclePositions.Vehicles[i]
-			if vp.TripID != "" {
-				s.vehicles[tripKey{vp.TripID, vp.StartDate}] = vp
+			vehicle := &vehiclePositions.Vehicles[i]
+			if vehicle.TripID != "" {
+				snapshot.vehiclesByRun[tripRun{vehicle.TripID, vehicle.StartDate}] = vehicle
 			}
 		}
 	}
-	return s
+	return snapshot
 }
 
 // Status is what the widget colours a departure by.
@@ -80,79 +91,79 @@ type Estimate struct {
 
 // Estimate applies live data to one scheduled departure. A nil Snapshot
 // is valid and yields schedule-only estimates.
-func (s *Snapshot) Estimate(d gtfs.Departure, th Thresholds) Estimate {
-	e := Estimate{Scheduled: d.Time, Expected: d.Time, Status: Scheduled,
+func (s *Snapshot) Estimate(departure gtfs.Departure, thresholds Thresholds) Estimate {
+	estimate := Estimate{Scheduled: departure.Time, Expected: departure.Time, Status: Scheduled,
 		StopsAway: -1, Occupancy: OccupancyUnknown}
-	if s == nil || d.FromFrequency {
-		return e // headway-based (metro) trips have no individual predictions
+	if s == nil || departure.FromFrequency {
+		return estimate // headway-based (metro) trips have no individual predictions
 	}
-	key := tripKey{d.TripID, d.ServiceDate}
-	tu, vp := s.trips[key], s.vehicles[key]
+	run := tripRun{departure.TripID, departure.ServiceDate}
+	update, vehicle := s.updatesByRun[run], s.vehiclesByRun[run]
 
-	if tu != nil && tu.Canceled {
-		e.Status = Canceled
-		return e
+	if update != nil && update.Canceled {
+		estimate.Status = Canceled
+		return estimate
 	}
-	ours := uint32(d.Sequence)
-	if vp != nil {
-		e.Tracked, e.VehicleID, e.Occupancy = true, vp.VehicleID, vp.Occupancy
-		if vp.CurrentSeq > ours {
-			e.Departed = true
-			return e
+	ourSequence := uint32(departure.Sequence)
+	if vehicle != nil {
+		estimate.Tracked, estimate.VehicleID, estimate.Occupancy = true, vehicle.VehicleID, vehicle.Occupancy
+		if vehicle.CurrentSequence > ourSequence {
+			estimate.Departed = true
+			return estimate
 		}
 	}
 
-	if tu != nil {
-		su, found := findStop(tu, ours, d.StopID)
+	if update != nil {
+		stopUpdate, found := findStop(update, ourSequence, departure.StopID)
 		switch {
-		case found && su.Relationship == StopSkipped:
-			e.Status = Skipped
-			return e
-		case found && su.Relationship != StopNoData && su.Time() != 0:
-			e.Expected = Time(su.Time())
-			e.Predicted = true
-		case !found && len(tu.Stops) > 0 && minSequence(tu) > ours:
+		case found && stopUpdate.Relationship == StopSkipped:
+			estimate.Status = Skipped
+			return estimate
+		case found && stopUpdate.Relationship != StopNoData && stopUpdate.Time() != 0:
+			estimate.Expected = Time(stopUpdate.Time())
+			estimate.Predicted = true
+		case !found && len(update.Stops) > 0 && minSequence(update) > ourSequence:
 			// Predictions only cover stops still ahead of the bus, and ours
 			// isn't among them: it has gone by.
-			e.Departed = true
-			return e
+			estimate.Departed = true
+			return estimate
 		}
 	}
 
-	if vp != nil {
-		e.StopsAway = stopsAway(vp, tu, ours)
+	if vehicle != nil {
+		estimate.StopsAway = stopsAway(vehicle, update, ourSequence)
 	}
-	if e.Predicted {
-		e.Delay = e.Expected.Sub(e.Scheduled)
+	if estimate.Predicted {
+		estimate.Delay = estimate.Expected.Sub(estimate.Scheduled)
 		switch {
-		case e.Delay >= th.Late:
-			e.Status = Late
-		case -e.Delay >= th.Early:
-			e.Status = Early
+		case estimate.Delay >= thresholds.Late:
+			estimate.Status = Late
+		case -estimate.Delay >= thresholds.Early:
+			estimate.Status = Early
 		default:
-			e.Status = OnTime
+			estimate.Status = OnTime
 		}
 	}
-	return e
+	return estimate
 }
 
 // minSequence is the earliest stop the trip still has predictions for.
 // Don't use Stops[0]: STM appends skipped stops after the others, out of
 // sequence order.
-func minSequence(tu *TripUpdate) uint32 {
-	m := tu.Stops[0].Sequence
-	for _, s := range tu.Stops[1:] {
-		if s.Sequence < m {
-			m = s.Sequence
+func minSequence(update *TripUpdate) uint32 {
+	lowest := update.Stops[0].Sequence
+	for _, stop := range update.Stops[1:] {
+		if stop.Sequence < lowest {
+			lowest = stop.Sequence
 		}
 	}
-	return m
+	return lowest
 }
 
-func findStop(tu *TripUpdate, seq uint32, stopID string) (StopUpdate, bool) {
-	for _, s := range tu.Stops {
-		if (s.Sequence != 0 && s.Sequence == seq) || (s.Sequence == 0 && s.StopID == stopID) {
-			return s, true
+func findStop(update *TripUpdate, sequence uint32, stopID string) (StopUpdate, bool) {
+	for _, stop := range update.Stops {
+		if (stop.Sequence != 0 && stop.Sequence == sequence) || (stop.Sequence == 0 && stop.StopID == stopID) {
+			return stop, true
 		}
 	}
 	return StopUpdate{}, false
@@ -160,32 +171,32 @@ func findStop(tu *TripUpdate, seq uint32, stopID string) (StopUpdate, bool) {
 
 // stopsAway counts the stops the vehicle still has to serve before ours,
 // plus ours: 1 means "next stop", 0 means it is at our stop now.
-func stopsAway(vp *VehiclePosition, tu *TripUpdate, ours uint32) int {
-	cur := vp.CurrentSeq
-	if cur == 0 {
+func stopsAway(vehicle *VehiclePosition, update *TripUpdate, ourSequence uint32) int {
+	current := vehicle.CurrentSequence
+	if current == 0 {
 		return -1
 	}
 	// "Stopped at X" means X is behind it once it leaves; "in transit to X"
 	// means X is still ahead.
-	from := cur
-	if vp.Status == StoppedAt {
-		from = cur + 1
+	firstAhead := current
+	if vehicle.Status == StoppedAt {
+		firstAhead = current + 1
 	}
-	if tu != nil && len(tu.Stops) > 0 {
+	if update != nil && len(update.Stops) > 0 {
 		// Count the stops the trip will actually serve, so a detour that
 		// skips stops doesn't inflate the number.
-		n := 0
-		for _, s := range tu.Stops {
-			if s.Sequence >= from && s.Sequence <= ours && s.Relationship != StopSkipped {
-				n++
+		count := 0
+		for _, stop := range update.Stops {
+			if stop.Sequence >= firstAhead && stop.Sequence <= ourSequence && stop.Relationship != StopSkipped {
+				count++
 			}
 		}
-		return n
+		return count
 	}
 	// No predictions to count: assume consecutive sequence numbers, which
 	// is how STM numbers them.
-	if ours < from {
+	if ourSequence < firstAhead {
 		return 0
 	}
-	return int(ours-from) + 1
+	return int(ourSequence-firstAhead) + 1
 }

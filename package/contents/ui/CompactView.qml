@@ -1,5 +1,16 @@
 /*
-    SPDX-FileCopyrightText: 2026 Thomas Currie
+    stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+    https://github.com/TCurrie11/stm_tracker_widget
+
+    File:    package/contents/ui/CompactView.qml
+    Purpose: Panel view: the next departure of the top route.
+    Author:  TCurrie11 (https://github.com/TCurrie11)
+    Version: 0.1.0
+    Created: 2026-10-14
+    Updated: 2026-10-14
+    License: GPL-2.0-or-later
+
+    SPDX-FileCopyrightText: 2026 TCurrie11
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 

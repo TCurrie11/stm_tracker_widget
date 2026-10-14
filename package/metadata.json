@@ -5,7 +5,7 @@
         "Description": "Next bus and métro departures with live delays",
         "Icon": "preferences-system-network",
         "Category": "Online Services",
-        "Version": "0.1",
+        "Version": "0.1.0",
         "License": "GPL-2.0-or-later",
         "Website": "https://github.com/TCurrie11/stm_tracker_widget",
         "Authors": [{ "Name": "Thomas Currie" }]

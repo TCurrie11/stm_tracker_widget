@@ -1,9 +1,20 @@
-pragma ComponentBehavior: Bound
-
 /*
-    SPDX-FileCopyrightText: 2026 Thomas Currie
+    stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+    https://github.com/TCurrie11/stm_tracker_widget
+
+    File:    package/contents/ui/FullView.qml
+    Purpose: Popup and desktop view: a section per stop.
+    Author:  TCurrie11 (https://github.com/TCurrie11)
+    Version: 0.1.0
+    Created: 2026-10-14
+    Updated: 2026-10-14
+    License: GPL-2.0-or-later
+
+    SPDX-FileCopyrightText: 2026 TCurrie11
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+
+pragma ComponentBehavior: Bound
 
 // Popup / desktop view: a section per configured stop, in order.
 
@@ -76,7 +87,7 @@ PlasmaExtras.Representation {
 
                 Repeater {
                     model: full.app.boards
-                    delegate: section
+                    delegate: stopSection
                 }
             }
         }
@@ -88,36 +99,36 @@ PlasmaExtras.Representation {
             wrapMode: Text.Wrap
             text: {
                 const credits = full.app.boards.length > 0 && full.app.boards[0].data ? full.app.boards[0].data.credits : "";
-                const u = full.app.lastUpdated;
+                const updatedAt = full.app.lastUpdated;
                 let when = "";
-                if (u) {
-                    const ago = Math.floor((full.app.now - u) / 60000);
+                if (updatedAt) {
+                    const ago = Math.floor((full.app.now - updatedAt) / 60000);
                     when = full.app.reachable || ago < 1
-                        ? i18n("Updated %1", Qt.formatTime(u, Qt.locale().timeFormat(Locale.ShortFormat)))
+                        ? i18n("Updated %1", Qt.formatTime(updatedAt, Qt.locale().timeFormat(Locale.ShortFormat)))
                         : i18np("Updated %1 min ago", "Updated %1 min ago", ago);
                 }
-                return [when, credits].filter(s => s !== "").join(" · ");
+                return [when, credits].filter(part => part !== "").join(" · ");
             }
         }
     }
 
     Component {
-        id: section
+        id: stopSection
 
         ColumnLayout {
-            id: sec
+            id: section
 
             required property var modelData
             readonly property var watch: modelData.watch
             readonly property var board: modelData.data
-            readonly property var groups: board ? board.routes.filter(g => full.app.visibleDepartures(g).length > 0) : []
+            readonly property var groups: board ? board.routes.filter(group => full.app.visibleDepartures(group).length > 0) : []
             // Earliest departure, for "next at 5:30" when it is tomorrow.
             readonly property var first: {
                 let best = null;
-                for (const g of groups) {
-                    for (const d of g.departures) {
-                        if (!best || d.expected < best.expected) {
-                            best = d;
+                for (const group of groups) {
+                    for (const departure of group.departures) {
+                        if (!best || departure.expected < best.expected) {
+                            best = departure;
                         }
                     }
                 }
@@ -134,13 +145,13 @@ PlasmaExtras.Representation {
 
             Kirigami.Heading {
                 level: 4
-                text: sec.watch.stopName || (sec.board ? sec.board.stop.name : sec.watch.stop)
+                text: section.watch.stopName || (section.board ? section.board.stop.name : section.watch.stop)
                 elide: Text.ElideRight
                 Layout.fillWidth: true
             }
 
             PlasmaComponents.Label {
-                visible: sec.board !== null && sec.board.live.state !== "live" && full.pausedReasons.includes(sec.board.live.reason)
+                visible: section.board !== null && section.board.live.state !== "live" && full.pausedReasons.includes(section.board.live.reason)
                 text: i18n("Live data paused — showing schedule")
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7
@@ -149,9 +160,9 @@ PlasmaExtras.Representation {
             }
 
             PlasmaComponents.Label {
-                visible: sec.board !== null && (sec.groups.length === 0 || sec.tomorrowOnly)
-                text: sec.first
-                    ? i18n("No more departures tonight — next at %1", full.app.formatClock(sec.first.expected))
+                visible: section.board !== null && (section.groups.length === 0 || section.tomorrowOnly)
+                text: section.first
+                    ? i18n("No more departures tonight — next at %1", full.app.formatClock(section.first.expected))
                     : i18n("No departures in the next 12 hours")
                 opacity: 0.7
                 Layout.fillWidth: true
@@ -159,13 +170,13 @@ PlasmaExtras.Representation {
             }
 
             PlasmaComponents.Label {
-                visible: sec.board === null
+                visible: section.board === null
                 text: i18n("Loading…")
                 opacity: 0.7
             }
 
             Repeater {
-                model: sec.tomorrowOnly ? [] : sec.groups
+                model: section.tomorrowOnly ? [] : section.groups
                 delegate: DepartureRow {
                     required property var modelData
                     app: full.app

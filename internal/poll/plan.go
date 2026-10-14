@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/poll/plan.go
+// Purpose: Decides when live data is worth fetching.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package poll decides when the realtime feeds are worth fetching.
 //
 // Realtime data only matters when a bus or train on a route the user
@@ -37,25 +48,25 @@ const recheck = time.Hour
 // Decide returns the plan for now. lead is how long before a departure
 // polling should already be running, so predictions are warm (STM
 // publishes trip updates before the bus reaches the first stop).
-func Decide(f *gtfs.Feed, watches []Watch, now time.Time, lead time.Duration) Plan {
+func Decide(feed *gtfs.Feed, watches []Watch, now time.Time, lead time.Duration) Plan {
 	if len(watches) == 0 {
 		return Plan{WakeAt: now.Add(recheck), Reason: "nothing watched"}
 	}
 	var earliest time.Time
 	from := now.Add(-Grace)
-	for _, w := range watches {
-		for _, g := range f.Next(w.Stop, from, 1, w.Routes) {
-			if t := g.Departures[0].Time; earliest.IsZero() || t.Before(earliest) {
-				earliest = t
+	for _, watch := range watches {
+		for _, group := range feed.Next(watch.Stop, from, 1, watch.Routes) {
+			if departs := group.Departures[0].Time; earliest.IsZero() || departs.Before(earliest) {
+				earliest = departs
 			}
 		}
 	}
 	if earliest.IsZero() {
 		return Plan{WakeAt: now.Add(recheck), Reason: "no departures scheduled soon"}
 	}
-	wake := earliest.Add(-lead)
-	if !wake.After(now) {
+	wakeAt := earliest.Add(-lead)
+	if !wakeAt.After(now) {
 		return Plan{Active: true, Reason: "service"}
 	}
-	return Plan{WakeAt: wake, Reason: "no service until " + earliest.In(f.Loc).Format("15:04")}
+	return Plan{WakeAt: wakeAt, Reason: "no service until " + earliest.In(feed.TimeZone).Format("15:04")}
 }

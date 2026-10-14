@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/server/server_test.go
+// Purpose: Tests for the service and its HTTP API.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package server
 
 import (
@@ -28,7 +39,7 @@ type clock struct{ t time.Time }
 
 func (c *clock) now() time.Time { return c.t }
 func (c *clock) set(f *gtfs.Feed, hhmm string) {
-	t, err := time.ParseInLocation("2006-01-02 15:04", "2026-10-12 "+hhmm, f.Loc)
+	t, err := time.ParseInLocation("2006-01-02 15:04", "2026-10-12 "+hhmm, f.TimeZone)
 	if err != nil {
 		panic(err)
 	}
@@ -302,7 +313,7 @@ func TestPausedOvernight(t *testing.T) {
 	}
 	var st statusJSON
 	get(t, s, "/v1/status", &st)
-	if st.Realtime.ResumeAt == nil || st.Realtime.ResumeAt.In(s.Feed().Loc).Format("15:04") != "07:30" {
+	if st.Realtime.ResumeAt == nil || st.Realtime.ResumeAt.In(s.Feed().TimeZone).Format("15:04") != "07:30" {
 		t.Errorf("status %+v", st.Realtime)
 	}
 }

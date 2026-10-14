@@ -1,5 +1,16 @@
 /*
-    SPDX-FileCopyrightText: 2026 Thomas Currie
+    stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+    https://github.com/TCurrie11/stm_tracker_widget
+
+    File:    package/contents/ui/configGeneral.qml
+    Purpose: Settings page: find stops, pick routes, display options.
+    Author:  TCurrie11 (https://github.com/TCurrie11)
+    Version: 0.1.0
+    Created: 2026-10-14
+    Updated: 2026-10-14
+    License: GPL-2.0-or-later
+
+    SPDX-FileCopyrightText: 2026 TCurrie11
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
@@ -43,49 +54,49 @@ KCM.SimpleKCM {
     }
 
     function indexOf(stopId) {
-        return watchList.findIndex(w => w.stop === stopId);
+        return watchList.findIndex(watch => watch.stop === stopId);
     }
 
     function isMetro(stop) {
-        return stop.routes.length > 0 && stop.routes.every(r => r.mode === "metro");
+        return stop.routes.length > 0 && stop.routes.every(route => route.mode === "metro");
     }
 
     function toggleStop(stop, on) {
         let list = watchList.slice();
-        const i = indexOf(stop.id);
-        if (on && i < 0) {
+        const existing = indexOf(stop.id);
+        if (on && existing < 0) {
             list.push({ stop: stop.id, stopName: stop.name, routes: [], metro: isMetro(stop) });
             remember(stop);
-        } else if (!on && i >= 0) {
-            list.splice(i, 1);
+        } else if (!on && existing >= 0) {
+            list.splice(existing, 1);
         }
         save(list);
     }
 
-    function toggleRoute(i, route, on) {
+    function toggleRoute(index, route, on) {
         let list = watchList.slice();
-        let w = Object.assign({}, list[i]);
-        w.routes = (w.routes || []).filter(r => r !== route);
+        let watch = Object.assign({}, list[index]);
+        watch.routes = (watch.routes || []).filter(name => name !== route);
         if (on) {
-            w.routes.push(route);
+            watch.routes.push(route);
         }
-        list[i] = w;
+        list[index] = watch;
         save(list);
     }
 
-    function move(i, delta) {
+    function move(index, delta) {
         let list = watchList.slice();
-        const j = i + delta;
-        if (j < 0 || j >= list.length) {
+        const target = index + delta;
+        if (target < 0 || target >= list.length) {
             return;
         }
-        [list[i], list[j]] = [list[j], list[i]];
+        [list[index], list[target]] = [list[target], list[index]];
         save(list);
     }
 
-    function removeAt(i) {
+    function removeAt(index) {
         let list = watchList.slice();
-        list.splice(i, 1);
+        list.splice(index, 1);
         save(list);
     }
 
@@ -93,17 +104,17 @@ KCM.SimpleKCM {
     // it in place; "None" removes it.
     function setHomeStation(station) {
         let list = watchList.slice();
-        const i = list.findIndex(w => w.metro);
+        const current = list.findIndex(watch => watch.metro);
         if (!station) {
-            if (i >= 0) {
-                list.splice(i, 1);
+            if (current >= 0) {
+                list.splice(current, 1);
             }
         } else {
-            const w = { stop: station.id, stopName: station.name, routes: [], metro: true };
-            if (i >= 0) {
-                list[i] = w;
+            const home = { stop: station.id, stopName: station.name, routes: [], metro: true };
+            if (current >= 0) {
+                list[current] = home;
             } else {
-                list.push(w);
+                list.push(home);
             }
             remember(station);
         }
@@ -111,15 +122,15 @@ KCM.SimpleKCM {
     }
 
     function remember(stop) {
-        let m = Object.assign({}, routesByStop);
-        m[stop.id] = stop.routes;
-        routesByStop = m;
+        let known = Object.assign({}, routesByStop);
+        known[stop.id] = stop.routes;
+        routesByStop = known;
     }
 
     // ---- talking to transitd ----
 
-    function failed(err) {
-        console.warn("stmtransit settings:", err);
+    function failed(error) {
+        console.warn("stmtransit settings:", error);
         problem = i18n("Can't reach the transit service. Is transitd running?");
     }
 
@@ -130,13 +141,13 @@ KCM.SimpleKCM {
         }
         cfg_address = address;
         searching = true;
-        Api.nearby(cfg_serviceUrl, address, (err, data) => {
+        Api.nearby(cfg_serviceUrl, address, (error, data) => {
             searching = false;
-            if (err) {
-                if (err.indexOf("HTTP 404") >= 0) {
+            if (error) {
+                if (error.indexOf("HTTP 404") >= 0) {
                     problem = i18n("No address found. Try adding the city, e.g. \"1500 rue Berri, Montréal\".");
                 } else {
-                    failed(err);
+                    failed(error);
                 }
                 results = [];
                 return;
@@ -150,13 +161,13 @@ KCM.SimpleKCM {
     }
 
     function loadRoutes() {
-        for (const w of watchList) {
-            if (routesByStop[w.stop] !== undefined) {
+        for (const watch of watchList) {
+            if (routesByStop[watch.stop] !== undefined) {
                 continue;
             }
-            Api.stop(cfg_serviceUrl, w.stop, (err, stop) => {
-                if (err) {
-                    failed(err);
+            Api.stop(cfg_serviceUrl, watch.stop, (error, stop) => {
+                if (error) {
+                    failed(error);
                     return;
                 }
                 remember(stop);
@@ -165,19 +176,19 @@ KCM.SimpleKCM {
     }
 
     function loadStations() {
-        Api.stations(cfg_serviceUrl, (err, data) => {
-            if (err) {
-                failed(err);
+        Api.stations(cfg_serviceUrl, (error, data) => {
+            if (error) {
+                failed(error);
                 return;
             }
-            stations = data.stations.filter(s => isMetro(s));
+            stations = data.stations.filter(station => isMetro(station));
             syncHomeStation();
         });
     }
 
     function syncHomeStation() {
-        const home = watchList.find(w => w.metro);
-        homeStation.currentIndex = home ? stations.findIndex(s => s.id === home.stop) + 1 : 0;
+        const home = watchList.find(watch => watch.metro);
+        homeStation.currentIndex = home ? stations.findIndex(station => station.id === home.stop) + 1 : 0;
     }
 
     onWatchListChanged: {
@@ -353,7 +364,7 @@ KCM.SimpleKCM {
             id: homeStation
             Kirigami.FormData.label: i18n("Home station:")
             Layout.minimumWidth: Kirigami.Units.gridUnit * 14
-            model: [i18n("None")].concat(page.stations.map(s => s.name))
+            model: [i18n("None")].concat(page.stations.map(station => station.name))
             onActivated: index => page.setHomeStation(index === 0 ? null : page.stations[index - 1])
         }
 

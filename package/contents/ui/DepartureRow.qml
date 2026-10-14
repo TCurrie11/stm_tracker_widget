@@ -1,9 +1,20 @@
-pragma ComponentBehavior: Bound
-
 /*
-    SPDX-FileCopyrightText: 2026 Thomas Currie
+    stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+    https://github.com/TCurrie11/stm_tracker_widget
+
+    File:    package/contents/ui/DepartureRow.qml
+    Purpose: One route and direction with its next departures.
+    Author:  TCurrie11 (https://github.com/TCurrie11)
+    Version: 0.1.0
+    Created: 2026-10-14
+    Updated: 2026-10-14
+    License: GPL-2.0-or-later
+
+    SPDX-FileCopyrightText: 2026 TCurrie11
     SPDX-License-Identifier: GPL-2.0-or-later
 */
+
+pragma ComponentBehavior: Bound
 
 // One route in one direction: badge and headsign, then the next few
 // departures. When narrow, the departures wrap under the headsign.
@@ -25,9 +36,9 @@ GridLayout {
     readonly property real headsignWidth: Kirigami.Units.gridUnit * 9
     // Same width in every row so the columns line up; shrinks when narrow.
     readonly property real cellWidth: {
-        const n = Math.max(1, app.perDirection);
-        const room = (wide ? width - headsignWidth - columnSpacing : width) - Kirigami.Units.largeSpacing * (n - 1);
-        return Math.max(Kirigami.Units.gridUnit * 3, Math.min(Kirigami.Units.gridUnit * 5, room / n));
+        const columns = Math.max(1, app.perDirection);
+        const room = (wide ? width - headsignWidth - columnSpacing : width) - Kirigami.Units.largeSpacing * (columns - 1);
+        return Math.max(Kirigami.Units.gridUnit * 3, Math.min(Kirigami.Units.gridUnit * 5, room / columns));
     }
 
     columns: wide ? 2 : 1
@@ -73,41 +84,41 @@ GridLayout {
             id: cell
 
             required property var modelData
-            readonly property var d: modelData
-            readonly property bool gone: d.status === "canceled" || d.status === "skipped"
+            readonly property var departure: modelData
+            readonly property bool gone: departure.status === "canceled" || departure.status === "skipped"
 
             spacing: 0
             Layout.alignment: Qt.AlignTop
             Layout.preferredWidth: row.cellWidth
             Layout.maximumWidth: row.cellWidth
-            opacity: row.app.statusOpacity(d.status)
+            opacity: row.app.statusOpacity(departure.status)
 
             RowLayout {
                 spacing: Kirigami.Units.smallSpacing
                 PlasmaComponents.Label {
-                    text: row.app.countdown(cell.d)
+                    text: row.app.countdown(cell.departure)
                     font.pointSize: Kirigami.Theme.defaultFont.pointSize * 1.4
                     font.bold: !cell.gone
                     font.strikeout: cell.gone
-                    color: row.app.statusColor(cell.d.status)
+                    color: row.app.statusColor(cell.departure.status)
                 }
                 OccupancyBar {
-                    level: cell.d.occupancy
-                    visible: row.app.showOccupancy && cell.d.occupancy > 0 && !cell.gone
+                    level: cell.departure.occupancy
+                    visible: row.app.showOccupancy && cell.departure.occupancy > 0 && !cell.gone
                     Layout.alignment: Qt.AlignVCenter
                 }
             }
             PlasmaComponents.Label {
-                text: row.app.delayText(cell.d)
+                text: row.app.delayText(cell.departure)
                 font: Kirigami.Theme.smallFont
-                color: row.app.statusColor(cell.d.status)
+                color: row.app.statusColor(cell.departure.status)
                 elide: Text.ElideRight
                 wrapMode: cell.gone ? Text.Wrap : Text.NoWrap
                 Layout.fillWidth: true
             }
             PlasmaComponents.Label {
                 visible: text !== "" && !cell.gone
-                text: row.app.stopsText(cell.d)
+                text: row.app.stopsText(cell.departure)
                 font: Kirigami.Theme.smallFont
                 opacity: 0.7
                 elide: Text.ElideRight

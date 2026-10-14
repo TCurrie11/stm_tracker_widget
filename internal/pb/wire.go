@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/pb/wire.go
+// Purpose: A minimal, dependency-free protobuf wire-format reader.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package pb is a minimal reader for the protobuf wire format.
 //
 // GTFS-Realtime feeds are protobuf messages. Rather than depend on the full
@@ -28,61 +39,61 @@ var ErrTruncated = errors.New("pb: truncated message")
 
 // Reader walks the fields of one message.
 type Reader struct {
-	buf []byte
-	pos int
+	buffer []byte
+	offset int
 
-	field int
-	wire  int
-	// value of the current field: n for Varint/Fixed*, b for Bytes
-	n uint64
-	b []byte
+	fieldNumber int
+	wireType    int
+	// Value of the current field: scalar for Varint and Fixed*, bytes for Bytes.
+	scalar uint64
+	bytes  []byte
 
 	err error
 }
 
 // NewReader reads the message in buf. buf is not copied; Bytes and String
 // values alias it.
-func NewReader(buf []byte) *Reader { return &Reader{buf: buf} }
+func NewReader(buffer []byte) *Reader { return &Reader{buffer: buffer} }
 
 // Next advances to the next field. It returns false at the end of the
 // message or on error; check Err afterwards.
 func (r *Reader) Next() bool {
-	if r.err != nil || r.pos >= len(r.buf) {
+	if r.err != nil || r.offset >= len(r.buffer) {
 		return false
 	}
-	tag, ok := r.varint()
+	key, ok := r.varint()
 	if !ok {
 		return false
 	}
-	r.field, r.wire = int(tag>>3), int(tag&7)
-	if r.field == 0 {
+	r.fieldNumber, r.wireType = int(key>>3), int(key&7)
+	if r.fieldNumber == 0 {
 		r.err = errors.New("pb: field number 0")
 		return false
 	}
-	switch r.wire {
+	switch r.wireType {
 	case Varint:
-		r.n, ok = r.varint()
+		r.scalar, ok = r.varint()
 	case Fixed64:
-		if ok = r.pos+8 <= len(r.buf); ok {
-			r.n = binary.LittleEndian.Uint64(r.buf[r.pos:])
-			r.pos += 8
+		if ok = r.offset+8 <= len(r.buffer); ok {
+			r.scalar = binary.LittleEndian.Uint64(r.buffer[r.offset:])
+			r.offset += 8
 		}
 	case Fixed32:
-		if ok = r.pos+4 <= len(r.buf); ok {
-			r.n = uint64(binary.LittleEndian.Uint32(r.buf[r.pos:]))
-			r.pos += 4
+		if ok = r.offset+4 <= len(r.buffer); ok {
+			r.scalar = uint64(binary.LittleEndian.Uint32(r.buffer[r.offset:]))
+			r.offset += 4
 		}
 	case Bytes:
-		var l uint64
-		if l, ok = r.varint(); ok {
-			if ok = l <= uint64(len(r.buf)-r.pos); ok {
-				r.b = r.buf[r.pos : r.pos+int(l)]
-				r.pos += int(l)
+		var length uint64
+		if length, ok = r.varint(); ok {
+			if ok = length <= uint64(len(r.buffer)-r.offset); ok {
+				r.bytes = r.buffer[r.offset : r.offset+int(length)]
+				r.offset += int(length)
 			}
 		}
 	default:
 		// Groups (3, 4) are deprecated and unused by GTFS-Realtime.
-		r.err = fmt.Errorf("pb: unsupported wire type %d for field %d", r.wire, r.field)
+		r.err = fmt.Errorf("pb: unsupported wire type %d for field %d", r.wireType, r.fieldNumber)
 		return false
 	}
 	if !ok {
@@ -95,32 +106,32 @@ func (r *Reader) Next() bool {
 }
 
 func (r *Reader) varint() (uint64, bool) {
-	v, n := binary.Uvarint(r.buf[r.pos:])
-	if n <= 0 {
+	value, size := binary.Uvarint(r.buffer[r.offset:])
+	if size <= 0 {
 		r.err = ErrTruncated
-		if n < 0 {
+		if size < 0 {
 			r.err = errors.New("pb: varint overflow")
 		}
 		return 0, false
 	}
-	r.pos += n
-	return v, true
+	r.offset += size
+	return value, true
 }
 
 // Err returns the first error encountered, if any.
 func (r *Reader) Err() error { return r.err }
 
 // Field is the current field number; Wire its wire type.
-func (r *Reader) Field() int { return r.field }
-func (r *Reader) Wire() int  { return r.wire }
+func (r *Reader) Field() int { return r.fieldNumber }
+func (r *Reader) Wire() int  { return r.wireType }
 
 // Typed accessors for the current field. Calling one that doesn't match
 // the wire type records an error rather than returning garbage.
 
-func (r *Reader) want(w int) bool {
-	if r.wire != w {
+func (r *Reader) expect(wireType int) bool {
+	if r.wireType != wireType {
 		if r.err == nil {
-			r.err = fmt.Errorf("pb: field %d has wire type %d, want %d", r.field, r.wire, w)
+			r.err = fmt.Errorf("pb: field %d has wire type %d, want %d", r.fieldNumber, r.wireType, wireType)
 		}
 		return false
 	}
@@ -128,10 +139,10 @@ func (r *Reader) want(w int) bool {
 }
 
 func (r *Reader) Uint64() uint64 {
-	if !r.want(Varint) {
+	if !r.expect(Varint) {
 		return 0
 	}
-	return r.n
+	return r.scalar
 }
 
 func (r *Reader) Uint32() uint32 { return uint32(r.Uint64()) }
@@ -142,25 +153,25 @@ func (r *Reader) Int64() int64 { return int64(r.Uint64()) }
 func (r *Reader) Int32() int32 { return int32(r.Uint64()) }
 
 func (r *Reader) Float32() float32 {
-	if !r.want(Fixed32) {
+	if !r.expect(Fixed32) {
 		return 0
 	}
-	return math.Float32frombits(uint32(r.n))
+	return math.Float32frombits(uint32(r.scalar))
 }
 
 func (r *Reader) Float64() float64 {
-	if !r.want(Fixed64) {
+	if !r.expect(Fixed64) {
 		return 0
 	}
-	return math.Float64frombits(r.n)
+	return math.Float64frombits(r.scalar)
 }
 
 // Bytes returns the raw value of a length-delimited field (aliases buf).
 func (r *Reader) Bytes() []byte {
-	if !r.want(Bytes) {
+	if !r.expect(Bytes) {
 		return nil
 	}
-	return r.b
+	return r.bytes
 }
 
 func (r *Reader) String() string { return string(r.Bytes()) }

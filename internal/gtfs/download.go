@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/gtfs/download.go
+// Purpose: Downloads the agency's GTFS schedule zip safely.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package gtfs
 
 import (
@@ -28,17 +39,17 @@ func Download(ctx context.Context, url, path string) (int64, error) {
 	if resp.StatusCode != http.StatusOK {
 		return 0, fmt.Errorf("download: %s", resp.Status)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(path), "gtfs-*.zip")
+	partial, err := os.CreateTemp(filepath.Dir(path), "gtfs-*.zip")
 	if err != nil {
 		return 0, err
 	}
-	defer os.Remove(tmp.Name())
-	n, err := io.Copy(tmp, resp.Body)
-	if cerr := tmp.Close(); err == nil {
-		err = cerr
+	defer os.Remove(partial.Name())
+	n, err := io.Copy(partial, resp.Body)
+	if closeErr := partial.Close(); err == nil {
+		err = closeErr
 	}
 	if err != nil {
 		return 0, err
 	}
-	return n, os.Rename(tmp.Name(), path)
+	return n, os.Rename(partial.Name(), path)
 }

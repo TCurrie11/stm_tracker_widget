@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/arrivals/board_test.go
+// Purpose: Tests for the departure board.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package arrivals
 
 import (
@@ -25,7 +36,7 @@ func feed(t *testing.T) *gtfs.Feed {
 }
 
 func at(f *gtfs.Feed, hhmm string) time.Time {
-	t, err := time.ParseInLocation("2006-01-02 15:04:05", "2026-10-12 "+hhmm, f.Loc)
+	t, err := time.ParseInLocation("2006-01-02 15:04:05", "2026-10-12 "+hhmm, f.TimeZone)
 	if err != nil {
 		panic(err)
 	}
@@ -73,7 +84,7 @@ func TestBoardMergesLiveData(t *testing.T) {
 		// 08:45 has no live data at all.
 	}}
 	vp := &realtime.Feed{Vehicles: []realtime.VehiclePosition{
-		{TripID: "24E-0800", StartDate: "20261012", VehicleID: "40068", CurrentSeq: 8,
+		{TripID: "24E-0800", StartDate: "20261012", VehicleID: "40068", CurrentSequence: 8,
 			Status: realtime.InTransitTo, Occupancy: realtime.FewSeatsAvailable},
 	}}
 	snap := realtime.NewSnapshot(tu, vp)
@@ -117,7 +128,7 @@ func TestBoardDropsBusesThatHavePassed(t *testing.T) {
 	}}
 	vp := &realtime.Feed{Vehicles: []realtime.VehiclePosition{
 		// Vehicle position says the same for 08:30.
-		{TripID: "24E-0830", StartDate: "20261012", CurrentSeq: 12},
+		{TripID: "24E-0830", StartDate: "20261012", CurrentSequence: 12},
 	}}
 	got := Board(f, realtime.NewSnapshot(tu, vp), "52345", nil, at(f, "08:12:00"), 1, realtime.DefaultThresholds)
 	if r := rows(got[0]); r != "24E-0845 08:45 scheduled" {
@@ -135,7 +146,7 @@ func TestSkippedStopsListedLast(t *testing.T) {
 			realtime.StopUpdate{Sequence: 6, Relationship: realtime.StopSkipped}),
 	}}
 	vp := &realtime.Feed{Vehicles: []realtime.VehiclePosition{
-		{TripID: "24E-0830", StartDate: "20261012", CurrentSeq: 7, Status: realtime.InTransitTo,
+		{TripID: "24E-0830", StartDate: "20261012", CurrentSequence: 7, Status: realtime.InTransitTo,
 			Occupancy: realtime.OccupancyUnknown},
 	}}
 	got := Board(f, realtime.NewSnapshot(tu, vp), "52345", nil, at(f, "08:20:00"), 1, realtime.DefaultThresholds)
@@ -160,7 +171,7 @@ func TestStopsAway(t *testing.T) {
 	}
 	for _, c := range cases {
 		vp := &realtime.Feed{Vehicles: []realtime.VehiclePosition{
-			{TripID: "24E-0830", StartDate: "20261012", CurrentSeq: c.seq, Status: c.status},
+			{TripID: "24E-0830", StartDate: "20261012", CurrentSequence: c.seq, Status: c.status},
 		}}
 		got := Board(f, realtime.NewSnapshot(nil, vp), "52345", nil, at(f, "08:20:00"), 1, realtime.DefaultThresholds)
 		if a := got[0].Departures[0].StopsAway; a != c.want {

@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/gtfs/feed.go
+// Purpose: Types for the in-memory GTFS schedule.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-12
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package gtfs loads a static GTFS feed (stops, routes, trips, schedules)
 // into memory and answers "what leaves this stop next?".
 package gtfs
@@ -27,16 +38,16 @@ type Route struct {
 func (r Route) IsMetro() bool { return r.Type == 1 }
 
 type trip struct {
-	routeIdx  int32
-	serviceID string
-	headsign  string
-	direction int8 // 0 or 1, -1 if missing
+	routeIndex int32
+	serviceID  string
+	headsign   string
+	direction  int8 // 0 or 1, -1 if missing
 }
 
 // stopTime is one scheduled visit of a trip at a stop. Times are seconds
 // after the service day's midnight and may exceed 24h (GTFS allows 25:10:00).
 type stopTime struct {
-	tripIdx   int32
+	tripIndex int32
 	departure int32
 	sequence  int32
 }
@@ -58,19 +69,19 @@ type Feed struct {
 	Stops  map[string]*Stop
 	Routes []Route
 
-	routeByID map[string]int32
-	trips     []trip
-	tripIDs   []string
-	tripByID  map[string]int32
+	routeIndexByID map[string]int32
+	trips          []trip
+	tripIDs        []string
+	tripIndexByID  map[string]int32
 	// stop_times grouped by stop ID, which is the only way we query them.
-	byStop map[string][]stopTime
+	stopTimesByStop map[string][]stopTime
 	// first scheduled departure of each trip, used to offset frequency trips
-	tripStart []int32
-	freqs     map[int32][]frequency
+	tripFirstDeparture []int32
+	frequenciesByTrip  map[int32][]frequency
 
-	services map[string]service
-	added    map[string]map[string]bool // date -> serviceID (calendar_dates type 1)
-	removed  map[string]map[string]bool // date -> serviceID (calendar_dates type 2)
-	children map[string][]string        // station ID -> platform stop IDs
-	Loc      *time.Location
+	services           map[string]service
+	servicesAddedOn    map[string]map[string]bool // date -> serviceID (calendar_dates type 1)
+	servicesRemovedOn  map[string]map[string]bool // date -> serviceID (calendar_dates type 2)
+	platformsByStation map[string][]string        // station ID -> platform stop IDs
+	TimeZone           *time.Location
 }

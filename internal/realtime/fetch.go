@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/realtime/fetch.go
+// Purpose: Fetches live feeds within STM's daily budget, with backoff.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package realtime
 
 import (
@@ -89,9 +100,9 @@ func (f *Fetcher) Fetch(ctx context.Context, name, feedURL string) (*Feed, error
 	if f.Auth.Header != "" {
 		req.Header.Set(f.Auth.Header, f.Auth.Key)
 	} else if f.Auth.Param != "" {
-		q := req.URL.Query()
-		q.Set(f.Auth.Param, f.Auth.Key)
-		req.URL.RawQuery = q.Encode()
+		query := req.URL.Query()
+		query.Set(f.Auth.Param, f.Auth.Key)
+		req.URL.RawQuery = query.Encode()
 	}
 	req.Header.Set("Accept", "application/x-protobuf, application/octet-stream")
 
@@ -102,9 +113,9 @@ func (f *Fetcher) Fetch(ctx context.Context, name, feedURL string) (*Feed, error
 	resp, err := client.Do(req)
 	if err != nil {
 		// *url.Error's message includes the full URL, query string and all.
-		var ue *url.Error
-		if errors.As(err, &ue) {
-			err = ue.Err
+		var urlErr *url.Error
+		if errors.As(err, &urlErr) {
+			err = urlErr.Err
 		}
 		f.fail(0)
 		return nil, fmt.Errorf("%s: %w", name, err)
@@ -156,9 +167,9 @@ func (f *Fetcher) fail(wait time.Duration) {
 	f.retryAt = f.clock().Add(min(wait, backoffMax))
 }
 
-func retryAfter(h string) time.Duration {
-	if s, err := strconv.Atoi(h); err == nil && s > 0 {
-		return time.Duration(s) * time.Second
+func retryAfter(header string) time.Duration {
+	if seconds, err := strconv.Atoi(header); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
 	}
 	return 0
 }
@@ -167,10 +178,10 @@ func retryAfter(h string) time.Duration {
 // once the day's allowance, minus a safety reserve, is used. The count is
 // saved to disk so restarting the service doesn't reset it.
 type Budget struct {
-	limit int
-	path  string
-	loc   *time.Location
-	now   func() time.Time
+	limit    int
+	path     string
+	timeZone *time.Location
+	now      func() time.Time
 
 	mu    sync.Mutex
 	state budgetState
@@ -184,13 +195,13 @@ type budgetState struct {
 // NewBudget loads the saved count from path, if any. limit 0 means
 // unlimited. path "" keeps the count in memory only.
 func NewBudget(path string, limit int, loc *time.Location) *Budget {
-	b := &Budget{limit: limit, path: path, loc: loc}
+	budget := &Budget{limit: limit, path: path, timeZone: loc}
 	if path != "" {
 		if data, err := os.ReadFile(path); err == nil {
-			_ = json.Unmarshal(data, &b.state) // a corrupt file just starts from 0
+			_ = json.Unmarshal(data, &budget.state) // a corrupt file just starts from 0
 		}
 	}
-	return b
+	return budget
 }
 
 // stopAt keeps 5% of the allowance in reserve, so a manual test with curl
@@ -205,7 +216,7 @@ func (b *Budget) Take() error {
 	if b.now != nil {
 		now = b.now
 	}
-	day := now().In(b.loc).Format("2006-01-02")
+	day := now().In(b.timeZone).Format("2006-01-02")
 	if b.state.Day != day {
 		b.state = budgetState{Day: day}
 	}

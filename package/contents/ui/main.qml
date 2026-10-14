@@ -1,5 +1,16 @@
 /*
-    SPDX-FileCopyrightText: 2026 Thomas Currie
+    stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+    https://github.com/TCurrie11/stm_tracker_widget
+
+    File:    package/contents/ui/main.qml
+    Purpose: Widget root: fetching, countdown and shared formatting.
+    Author:  TCurrie11 (https://github.com/TCurrie11)
+    Version: 0.1.0
+    Created: 2026-10-14
+    Updated: 2026-10-14
+    License: GPL-2.0-or-later
+
+    SPDX-FileCopyrightText: 2026 TCurrie11
     SPDX-License-Identifier: GPL-2.0-or-later
 */
 
@@ -33,39 +44,40 @@ PlasmoidItem {
     // Oldest successful update across all boards; invalid until each has one.
     readonly property var lastUpdated: {
         let oldest = null;
-        for (const b of boards) {
-            if (!b.updated) {
+        for (const board of boards) {
+            if (!board.updated) {
                 return null;
             }
-            if (!oldest || b.updated < oldest) {
-                oldest = b.updated;
+            if (!oldest || board.updated < oldest) {
+                oldest = board.updated;
             }
         }
         return oldest;
     }
-    readonly property bool reachable: boards.every(b => b.ok !== false)
-    readonly property bool hasData: boards.some(b => b.data !== null)
+    readonly property bool reachable: boards.every(board => board.ok !== false)
+    readonly property bool hasData: boards.some(board => board.data !== null)
     // Spec: keep showing the last data, dimmed, for 15 minutes; then give up.
     readonly property bool unavailable: !reachable && (!hasData || !lastUpdated || now - lastUpdated > 15 * 60000)
 
     // The panel shows the next departure of the first watch's first route.
     readonly property var topDeparture: {
-        const b = boards[0];
-        if (!b || !b.data || b.data.routes.length === 0) {
+        const firstBoard = boards[0];
+        if (!firstBoard || !firstBoard.data || firstBoard.data.routes.length === 0) {
             return null;
         }
-        const wanted = b.watch.routes && b.watch.routes.length > 0 ? b.watch.routes[0] : b.data.routes[0].route.short_name;
+        const firstWatch = firstBoard.watch;
+        const wantedRoute = firstWatch.routes && firstWatch.routes.length > 0 ? firstWatch.routes[0] : firstBoard.data.routes[0].route.short_name;
         let best = null;
-        for (const g of b.data.routes) {
-            if (g.route.short_name !== wanted && g.route.id !== wanted) {
+        for (const group of firstBoard.data.routes) {
+            if (group.route.short_name !== wantedRoute && group.route.id !== wantedRoute) {
                 continue;
             }
-            for (const d of visibleDepartures(g)) {
-                if (d.status === "canceled" || d.status === "skipped") {
+            for (const departure of visibleDepartures(group)) {
+                if (departure.status === "canceled" || departure.status === "skipped") {
                     continue;
                 }
-                if (!best || new Date(d.expected) < new Date(best.departure.expected)) {
-                    best = { group: g, departure: d };
+                if (!best || new Date(departure.expected) < new Date(best.departure.expected)) {
+                    best = { group: group, departure: departure };
                 }
             }
         }
@@ -84,16 +96,16 @@ PlasmoidItem {
         if (!topDeparture) {
             return watches.length === 0 ? i18n("Add a stop in settings") : "";
         }
-        const d = topDeparture.departure;
+        const departure = topDeparture.departure;
         let lines = [];
-        if (d.realtime) {
-            lines.push(i18n("Scheduled %1 · expected %2", formatClock(d.scheduled), formatClock(d.expected)));
+        if (departure.realtime) {
+            lines.push(i18n("Scheduled %1 · expected %2", formatClock(departure.scheduled), formatClock(departure.expected)));
         } else {
-            lines.push(i18n("Scheduled %1", formatClock(d.scheduled)));
+            lines.push(i18n("Scheduled %1", formatClock(departure.scheduled)));
         }
-        const s = stopsText(d);
-        if (s !== "") {
-            lines.push(s);
+        const stops = stopsText(departure);
+        if (stops !== "") {
+            lines.push(stops);
         }
         return lines.join("\n");
     }
@@ -108,25 +120,25 @@ PlasmoidItem {
     // ---- data ----
 
     function resetBoards() {
-        boards = watches.map(w => ({ watch: w, data: null, ok: null, updated: null }));
+        boards = watches.map(watch => ({ watch: watch, data: null, ok: null, updated: null }));
     }
 
     function refresh() {
-        const gen = ++generation;
-        const ws = watches;
-        ws.forEach((w, i) => {
-            Api.departures(serviceUrl, w.stop, w.routes, perDirection, (err, data) => {
-                if (gen !== generation) {
+        const requestGeneration = ++generation;
+        const watchesAtRequest = watches;
+        watchesAtRequest.forEach((watch, index) => {
+            Api.departures(serviceUrl, watch.stop, watch.routes, perDirection, (error, data) => {
+                if (requestGeneration !== generation) {
                     return;
                 }
-                let next = boards.slice();
-                if (err) {
-                    console.warn("stmtransit:", err);
-                    next[i] = Object.assign({}, next[i], { ok: false });
+                let updatedBoards = boards.slice();
+                if (error) {
+                    console.warn("stmtransit:", error);
+                    updatedBoards[index] = Object.assign({}, updatedBoards[index], { ok: false });
                 } else {
-                    next[i] = { watch: w, data: data, ok: true, updated: new Date() };
+                    updatedBoards[index] = { watch: watch, data: data, ok: true, updated: new Date() };
                 }
-                boards = next;
+                boards = updatedBoards;
             });
         });
     }
@@ -162,7 +174,7 @@ PlasmoidItem {
 
     // Departures still worth showing: drop any that left over 30 s ago.
     function visibleDepartures(group) {
-        return group.departures.filter(d => new Date(d.expected) - now > -30000);
+        return group.departures.filter(departure => new Date(departure.expected) - now > -30000);
     }
 
     function formatClock(iso) {
@@ -170,27 +182,27 @@ PlasmoidItem {
     }
 
     // "Now", "4 min", or the clock time when it is over an hour away.
-    function countdown(d) {
-        if (d.status === "canceled" || d.status === "skipped") {
-            return formatClock(d.scheduled);
+    function countdown(departure) {
+        if (departure.status === "canceled" || departure.status === "skipped") {
+            return formatClock(departure.scheduled);
         }
-        const m = Api.minutesUntil(d.expected, now);
-        if (m <= 0) {
+        const minutes = Api.minutesUntil(departure.expected, now);
+        if (minutes <= 0) {
             return i18nc("departure is due", "Now");
         }
-        if (m > 60) {
-            return formatClock(d.expected);
+        if (minutes > 60) {
+            return formatClock(departure.expected);
         }
-        return i18np("%1 min", "%1 min", m);
+        return i18np("%1 min", "%1 min", minutes);
     }
 
-    function delayText(d) {
-        const mins = Math.round(Math.abs(d.delay_seconds) / 60);
-        switch (d.status) {
+    function delayText(departure) {
+        const minutes = Math.round(Math.abs(departure.delay_seconds) / 60);
+        switch (departure.status) {
         case "late":
-            return "+" + mins;
+            return "+" + minutes;
         case "early":
-            return "−" + mins;
+            return "−" + minutes;
         case "on_time":
             return i18n("on time");
         case "canceled":
@@ -201,17 +213,17 @@ PlasmoidItem {
         return i18n("scheduled");
     }
 
-    function stopsText(d) {
-        if (d.stops_away === null || d.stops_away === undefined) {
+    function stopsText(departure) {
+        if (departure.stops_away === null || departure.stops_away === undefined) {
             return "";
         }
-        if (d.stops_away === 0) {
+        if (departure.stops_away === 0) {
             return i18n("at stop");
         }
-        if (d.stops_away === 1) {
+        if (departure.stops_away === 1) {
             return i18n("next stop");
         }
-        return i18np("%1 stop", "%1 stops", d.stops_away);
+        return i18np("%1 stop", "%1 stops", departure.stops_away);
     }
 
     function statusColor(status) {

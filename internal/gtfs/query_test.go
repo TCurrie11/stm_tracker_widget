@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/gtfs/query_test.go
+// Purpose: Tests for schedule loading and queries.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-12
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package gtfs
 
 import (
@@ -29,7 +40,7 @@ func loadFixture(t *testing.T) *Feed {
 }
 
 func at(f *Feed, s string) time.Time {
-	t, err := time.ParseInLocation("2006-01-02 15:04", s, f.Loc)
+	t, err := time.ParseInLocation("2006-01-02 15:04", s, f.TimeZone)
 	if err != nil {
 		panic(err)
 	}
@@ -138,7 +149,7 @@ func TestDSTChangeDay(t *testing.T) {
 	if len(g) != 1 {
 		t.Fatalf("got %+v", g)
 	}
-	if h := g[0].Departures[0].Time.In(f.Loc).Hour(); h != 8 {
+	if h := g[0].Departures[0].Time.In(f.TimeZone).Hour(); h != 8 {
 		t.Errorf("want 08:00 local, got hour %d", h)
 	}
 }

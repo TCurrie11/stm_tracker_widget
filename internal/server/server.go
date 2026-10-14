@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/server/server.go
+// Purpose: The background service: schedule upkeep and live polling.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package server runs transitd as a background service: it keeps the
 // schedule loaded, polls the realtime feeds while they are useful, and
 // answers the widget from memory over HTTP on localhost.
@@ -57,8 +68,8 @@ type Service struct {
 	scheduleErr error
 	loadedMod   time.Time // modification time of the loaded zip
 
-	geoMu   sync.Mutex
-	geoLast time.Time
+	geoMu       sync.Mutex
+	lastGeocode time.Time
 }
 
 type watch struct {
@@ -136,21 +147,21 @@ func (s *Service) scheduleLoop(ctx context.Context) {
 // it if it changed on disk, which also picks up a manual `transitd fetch`.
 // It reports whether a schedule is loaded.
 func (s *Service) refreshSchedule(ctx context.Context) bool {
-	fi, err := os.Stat(s.GTFSPath)
-	stale := err == nil && s.GTFSMaxAge > 0 && s.clock().Sub(fi.ModTime()) > s.GTFSMaxAge
+	info, err := os.Stat(s.GTFSPath)
+	stale := err == nil && s.GTFSMaxAge > 0 && s.clock().Sub(info.ModTime()) > s.GTFSMaxAge
 	if errors.Is(err, os.ErrNotExist) || stale {
 		s.Log.Printf("downloading schedule from %s", s.Agency.GTFSURL)
-		dctx, cancel := context.WithTimeout(ctx, 10*time.Minute)
-		n, derr := gtfs.Download(dctx, s.Agency.GTFSURL, s.GTFSPath)
+		downloadCtx, cancel := context.WithTimeout(ctx, 10*time.Minute)
+		size, downloadErr := gtfs.Download(downloadCtx, s.Agency.GTFSURL, s.GTFSPath)
 		cancel()
-		if derr != nil {
+		if downloadErr != nil {
 			// A stale schedule is still far better than none: keep it.
-			s.Log.Printf("schedule download failed: %v", derr)
-			s.setScheduleErr(derr)
+			s.Log.Printf("schedule download failed: %v", downloadErr)
+			s.setScheduleErr(downloadErr)
 		} else {
-			s.Log.Printf("saved %.1f MB to %s", float64(n)/1e6, s.GTFSPath)
+			s.Log.Printf("saved %.1f MB to %s", float64(size)/1e6, s.GTFSPath)
 		}
-		fi, err = os.Stat(s.GTFSPath)
+		info, err = os.Stat(s.GTFSPath)
 	}
 	if err != nil {
 		if s.scheduleError() == nil {
@@ -160,7 +171,7 @@ func (s *Service) refreshSchedule(ctx context.Context) bool {
 	}
 
 	s.mu.Lock()
-	unchanged := fi.ModTime().Equal(s.loadedMod)
+	unchanged := info.ModTime().Equal(s.loadedMod)
 	s.mu.Unlock()
 	if unchanged && s.Feed() != nil {
 		return true
@@ -171,17 +182,17 @@ func (s *Service) refreshSchedule(ctx context.Context) bool {
 		return s.Feed() != nil
 	}
 	start := time.Now()
-	f, err := gtfs.Load(s.GTFSPath, loc)
+	feed, err := gtfs.Load(s.GTFSPath, loc)
 	if err != nil {
 		s.Log.Printf("loading schedule: %v", err)
 		s.setScheduleErr(err)
 		return s.Feed() != nil
 	}
-	s.feed.Store(f)
+	s.feed.Store(feed)
 	s.mu.Lock()
-	s.loadedMod, s.scheduleErr = fi.ModTime(), nil
+	s.loadedMod, s.scheduleErr = info.ModTime(), nil
 	s.mu.Unlock()
-	s.Log.Printf("loaded %d stops, %d routes in %s", len(f.Stops), len(f.Routes),
+	s.Log.Printf("loaded %d stops, %d routes in %s", len(feed.Stops), len(feed.Routes),
 		time.Since(start).Round(time.Millisecond))
 	s.wake()
 	return true
@@ -223,12 +234,12 @@ func (s *Service) activeWatches(now time.Time) []poll.Watch {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	var out []poll.Watch
-	for k, w := range s.watches {
-		if now.Sub(w.lastAsked) > s.IdleAfter {
-			delete(s.watches, k)
+	for key, watch := range s.watches {
+		if now.Sub(watch.lastAsked) > s.IdleAfter {
+			delete(s.watches, key)
 			continue
 		}
-		out = append(out, w.Watch)
+		out = append(out, watch.Watch)
 	}
 	return out
 }
@@ -237,8 +248,8 @@ func (s *Service) activeWatches(now time.Time) []poll.Watch {
 // how long to sleep before the next one.
 func (s *Service) step(ctx context.Context) time.Duration {
 	s.init()
-	f := s.Feed()
-	if f == nil {
+	feed := s.Feed()
+	if feed == nil {
 		return maxSleep // the schedule loop wakes us once it is loaded
 	}
 	if s.Fetcher == nil || s.Agency.TripUpdatesURL == "" {
@@ -251,7 +262,7 @@ func (s *Service) step(ctx context.Context) time.Duration {
 		s.setPolling("idle", poll.Plan{Reason: "widget not open"})
 		return maxSleep
 	}
-	plan := poll.Decide(f, watches, now, s.WakeLead)
+	plan := poll.Decide(feed, watches, now, s.WakeLead)
 	if !plan.Active {
 		s.setPolling("paused", plan)
 		return plan.WakeAt.Sub(now)
@@ -290,34 +301,34 @@ func (s *Service) fetch(ctx context.Context, now time.Time) {
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-	tu, err := s.Fetcher.Fetch(ctx, "trip updates", s.Agency.TripUpdatesURL)
+	tripUpdates, err := s.Fetcher.Fetch(ctx, "trip updates", s.Agency.TripUpdatesURL)
 	if err != nil {
 		s.mu.Lock()
-		repeat := s.liveErr != nil && s.liveErr.Error() == err.Error()
-		var bo *realtime.BackoffError
-		if !errors.As(err, &bo) || s.liveErr == nil {
+		sameAsLast := s.liveErr != nil && s.liveErr.Error() == err.Error()
+		var backoff *realtime.BackoffError
+		if !errors.As(err, &backoff) || s.liveErr == nil {
 			s.liveErr = err // keep the cause, not "backing off", for the widget
 		}
 		s.mu.Unlock()
-		if !repeat && !errors.As(err, &bo) {
+		if !sameAsLast && !errors.As(err, &backoff) {
 			s.Log.Printf("realtime: %v", err)
 		}
 		return
 	}
-	var vp *realtime.Feed
+	var vehiclePositions *realtime.Feed
 	if s.Agency.VehiclePositionsURL != "" {
 		// Positions only add stops-away and occupancy; predictions alone
 		// are still worth showing if this one fails.
-		if vp, err = s.Fetcher.Fetch(ctx, "vehicle positions", s.Agency.VehiclePositionsURL); err != nil {
+		if vehiclePositions, err = s.Fetcher.Fetch(ctx, "vehicle positions", s.Agency.VehiclePositionsURL); err != nil {
 			s.Log.Printf("realtime: %v", err)
 		}
 	}
-	snap := realtime.NewSnapshot(tu, vp)
+	snapshot := realtime.NewSnapshot(tripUpdates, vehiclePositions)
 	s.mu.Lock()
 	if s.liveErr != nil {
 		s.Log.Printf("realtime: recovered")
 	}
-	s.snap, s.fetchedAt, s.liveErr = snap, s.clock(), nil
+	s.snap, s.fetchedAt, s.liveErr = snapshot, s.clock(), nil
 	s.mu.Unlock()
 }
 

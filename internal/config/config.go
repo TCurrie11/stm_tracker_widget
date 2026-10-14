@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/config/config.go
+// Purpose: Loads and validates transitd's JSON settings.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package config loads transitd's settings from a JSON file.
 //
 // Everything agency-specific lives here, so supporting another GTFS agency
@@ -108,39 +119,39 @@ func DefaultPath() string {
 // Load reads path over the defaults. A missing file is not an error: the
 // defaults are returned so `transitd` works out of the box.
 func Load(path string) (Config, error) {
-	c := Default()
-	b, err := os.ReadFile(path)
+	cfg := Default()
+	data, err := os.ReadFile(path)
 	if errors.Is(err, os.ErrNotExist) {
-		return c, nil
+		return cfg, nil
 	}
 	if err != nil {
-		return c, err
+		return cfg, err
 	}
 	// Agencies in the file replace the default list rather than merging into
 	// it, so decode them separately and only override when present.
-	c.Agencies = nil
-	if err := json.Unmarshal(b, &c); err != nil {
-		return c, fmt.Errorf("%s: %w", path, err)
+	cfg.Agencies = nil
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return cfg, fmt.Errorf("%s: %w", path, err)
 	}
-	if len(c.Agencies) == 0 {
-		c.Agencies = Default().Agencies
+	if len(cfg.Agencies) == 0 {
+		cfg.Agencies = Default().Agencies
 	}
-	return c, c.Validate()
+	return cfg, cfg.Validate()
 }
 
 // Validate checks for settings that would fail later in confusing ways.
 func (c Config) Validate() error {
-	seen := map[string]bool{}
-	for i, a := range c.Agencies {
-		if a.ID == "" || a.GTFSURL == "" || a.Timezone == "" {
+	seenIDs := map[string]bool{}
+	for i, agency := range c.Agencies {
+		if agency.ID == "" || agency.GTFSURL == "" || agency.Timezone == "" {
 			return fmt.Errorf("agency %d: id, gtfs_url and timezone are required", i)
 		}
-		if seen[a.ID] {
-			return fmt.Errorf("agency %q listed twice", a.ID)
+		if seenIDs[agency.ID] {
+			return fmt.Errorf("agency %q listed twice", agency.ID)
 		}
-		seen[a.ID] = true
-		if _, err := time.LoadLocation(a.Timezone); err != nil {
-			return fmt.Errorf("agency %q: %w", a.ID, err)
+		seenIDs[agency.ID] = true
+		if _, err := time.LoadLocation(agency.Timezone); err != nil {
+			return fmt.Errorf("agency %q: %w", agency.ID, err)
 		}
 	}
 	switch c.Geocoder.Provider {
@@ -173,10 +184,10 @@ func (d *Duration) UnmarshalJSON(b []byte) error {
 	if err := json.Unmarshal(b, &s); err != nil {
 		return fmt.Errorf("duration must be a string like \"60s\": %w", err)
 	}
-	v, err := time.ParseDuration(s)
+	parsed, err := time.ParseDuration(s)
 	if err != nil {
 		return err
 	}
-	*d = Duration(v)
+	*d = Duration(parsed)
 	return nil
 }

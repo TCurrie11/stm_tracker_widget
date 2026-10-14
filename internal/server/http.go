@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/server/http.go
+// Purpose: The widget's JSON API on localhost.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package server
 
 import (
@@ -59,10 +70,10 @@ func localOnly(next http.Handler) http.Handler {
 	})
 }
 
-func (s *Service) needFeed(h func(http.ResponseWriter, *http.Request, *gtfs.Feed)) http.HandlerFunc {
+func (s *Service) needFeed(handler func(http.ResponseWriter, *http.Request, *gtfs.Feed)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		f := s.Feed()
-		if f == nil {
+		feed := s.Feed()
+		if feed == nil {
 			msg := "schedule still loading"
 			if err := s.scheduleError(); err != nil {
 				msg = "schedule unavailable: " + err.Error()
@@ -71,7 +82,7 @@ func (s *Service) needFeed(h func(http.ResponseWriter, *http.Request, *gtfs.Feed
 			writeError(w, http.StatusServiceUnavailable, msg)
 			return
 		}
-		h(w, r, f)
+		handler(w, r, feed)
 	}
 }
 
@@ -135,79 +146,79 @@ type departureJSON struct {
 	VehicleID string `json:"vehicle_id,omitempty"`
 }
 
-func (s *Service) handleDepartures(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
-	q := r.URL.Query()
-	stopID := q.Get("stop")
+func (s *Service) handleDepartures(w http.ResponseWriter, r *http.Request, feed *gtfs.Feed) {
+	query := r.URL.Query()
+	stopID := query.Get("stop")
 	if stopID == "" {
 		writeError(w, http.StatusBadRequest, "stop is required")
 		return
 	}
-	stop, ok := f.Stops[stopID]
+	stopInfo, ok := feed.Stops[stopID]
 	if !ok {
 		writeError(w, http.StatusNotFound, "no stop with ID "+strconv.Quote(stopID))
 		return
 	}
-	n := 3
-	if v := q.Get("n"); v != "" {
+	perDirection := 3
+	if v := query.Get("n"); v != "" {
 		var err error
-		if n, err = strconv.Atoi(v); err != nil || n < 1 || n > 10 {
+		if perDirection, err = strconv.Atoi(v); err != nil || perDirection < 1 || perDirection > 10 {
 			writeError(w, http.StatusBadRequest, "n must be 1 to 10")
 			return
 		}
 	}
-	routes := splitList(q.Get("routes"))
+	routes := splitList(query.Get("routes"))
 
 	s.Watch(stopID, routes)
 	now := s.clock()
 	live := s.live(now)
-	resp := departuresResponse{
-		Stop:    toStopJSON(f, stop),
-		Now:     now.In(f.Loc),
+	response := departuresResponse{
+		Stop:    toStopJSON(feed, stopInfo),
+		Now:     now.In(feed.TimeZone),
 		Live:    liveJSON{State: "schedule", Reason: live.Reason, Note: live.Note},
 		Routes:  []groupJSON{},
 		Credits: credits(s.Agency.Name),
 	}
 	if live.Snapshot != nil {
-		resp.Live.State = "live"
+		response.Live.State = "live"
 		if t := live.Snapshot.FeedTime; !t.IsZero() {
-			t = t.In(f.Loc)
-			resp.Live.FeedTime = &t
+			t = t.In(feed.TimeZone)
+			response.Live.FeedTime = &t
 		}
 	}
-	for _, g := range arrivals.Board(f, live.Snapshot, stopID, routes, now, n, realtime.DefaultThresholds) {
-		gj := groupJSON{Route: toRouteJSON(g.Route), Direction: g.Direction, Headsign: g.Headsign}
-		for _, d := range g.Departures {
-			gj.Departures = append(gj.Departures, toDepartureJSON(d, now, f))
+	for _, group := range arrivals.Board(feed, live.Snapshot, stopID, routes, now, perDirection, realtime.DefaultThresholds) {
+		groupOut := groupJSON{Route: toRouteJSON(group.Route), Direction: group.Direction, Headsign: group.Headsign}
+		for _, departure := range group.Departures {
+			groupOut.Departures = append(groupOut.Departures, toDepartureJSON(departure, now, feed))
 		}
-		resp.Routes = append(resp.Routes, gj)
+		response.Routes = append(response.Routes, groupOut)
 	}
-	writeJSON(w, http.StatusOK, resp)
+	writeJSON(w, http.StatusOK, response)
 }
 
-func toDepartureJSON(d arrivals.Departure, now time.Time, f *gtfs.Feed) departureJSON {
+func toDepartureJSON(departure arrivals.Departure, now time.Time, feed *gtfs.Feed) departureJSON {
 	out := departureJSON{
-		TripID:    d.TripID,
-		Scheduled: d.Scheduled.In(f.Loc),
-		Expected:  d.Expected.In(f.Loc),
-		Minutes:   int(d.Expected.Sub(now).Minutes()),
-		Status:    string(d.Status),
-		Realtime:  d.Predicted,
-		Frequency: d.Frequency,
-		Occupancy: d.Occupancy.Level(),
-		VehicleID: d.VehicleID,
+		TripID:    departure.TripID,
+		Scheduled: departure.Scheduled.In(feed.TimeZone),
+		Expected:  departure.Expected.In(feed.TimeZone),
+		Minutes:   int(departure.Expected.Sub(now).Minutes()),
+		Status:    string(departure.Status),
+		Realtime:  departure.Predicted,
+		Frequency: departure.Frequency,
+		Occupancy: departure.Occupancy.Level(),
+		VehicleID: departure.VehicleID,
 	}
-	if d.Predicted {
-		out.Delay = int(d.Delay.Seconds())
+	if departure.Predicted {
+		out.Delay = int(departure.Delay.Seconds())
 	}
-	if d.StopsAway >= 0 {
-		out.StopsAway = &d.StopsAway
+	if departure.StopsAway >= 0 {
+		out.StopsAway = &departure.StopsAway
 	}
 	return out
 }
 
-func toRouteJSON(r gtfs.Route) routeJSON {
+func toRouteJSON(route gtfs.Route) routeJSON {
 	mode := "other"
-	switch r.Type {
+	switch route.Type {
 	case 0:
 		mode = "tram"
 	case 1:
@@ -217,7 +228,7 @@ func toRouteJSON(r gtfs.Route) routeJSON {
 	case 3:
 		mode = "bus"
 	}
-	return routeJSON{ID: r.ID, ShortName: r.ShortName, LongName: r.LongName, Mode: mode, Color: r.Color}
+	return routeJSON{ID: route.ID, ShortName: route.ShortName, LongName: route.LongName, Mode: mode, Color: route.Color}
 }
 
 func credits(agency string) string {
@@ -250,47 +261,47 @@ type stopJSON struct {
 	Routes  []routeJSON `json:"routes"`
 }
 
-func toStopJSON(f *gtfs.Feed, s *gtfs.Stop) stopJSON {
-	out := stopJSON{ID: s.ID, Code: s.Code, Name: s.Name, Station: s.IsStation,
-		Lat: s.Lat, Lon: s.Lon, Routes: []routeJSON{}}
-	for _, r := range f.RoutesAt(s.ID) {
-		out.Routes = append(out.Routes, toRouteJSON(r))
+func toStopJSON(feed *gtfs.Feed, stop *gtfs.Stop) stopJSON {
+	out := stopJSON{ID: stop.ID, Code: stop.Code, Name: stop.Name, Station: stop.IsStation,
+		Lat: stop.Lat, Lon: stop.Lon, Routes: []routeJSON{}}
+	for _, route := range feed.RoutesAt(stop.ID) {
+		out.Routes = append(out.Routes, toRouteJSON(route))
 	}
 	return out
 }
 
-func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
-	q := strings.TrimSpace(r.URL.Query().Get("q"))
-	if q == "" {
+func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request, feed *gtfs.Feed) {
+	query := strings.TrimSpace(r.URL.Query().Get("q"))
+	if query == "" {
 		writeError(w, http.StatusBadRequest, "q is required")
 		return
 	}
 	out := []stopJSON{}
-	for _, st := range f.SearchStops(q, 25) {
-		out = append(out, toStopJSON(f, st))
+	for _, stop := range feed.SearchStops(query, 25) {
+		out = append(out, toStopJSON(feed, stop))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"stops": out})
 }
 
 // handleStop is for the settings page: it lists a saved stop's routes
 // without counting as the widget watching it.
-func (s *Service) handleStop(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
-	st, ok := f.Stops[r.PathValue("id")]
+func (s *Service) handleStop(w http.ResponseWriter, r *http.Request, feed *gtfs.Feed) {
+	stop, ok := feed.Stops[r.PathValue("id")]
 	if !ok {
 		writeError(w, http.StatusNotFound, "no stop with ID "+strconv.Quote(r.PathValue("id")))
 		return
 	}
-	writeJSON(w, http.StatusOK, toStopJSON(f, st))
+	writeJSON(w, http.StatusOK, toStopJSON(feed, stop))
 }
 
 // handleStations lists parent stations, which in STM's feed are exactly
 // the métro stations; the widget offers them as a "home station" list.
-func (s *Service) handleStations(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
+func (s *Service) handleStations(w http.ResponseWriter, r *http.Request, feed *gtfs.Feed) {
 	out := []stopJSON{}
-	for _, st := range f.Stops {
-		if st.IsStation {
-			if sj := toStopJSON(f, st); len(sj.Routes) > 0 {
-				out = append(out, sj)
+	for _, stop := range feed.Stops {
+		if stop.IsStation {
+			if entry := toStopJSON(feed, stop); len(entry.Routes) > 0 {
+				out = append(out, entry)
 			}
 		}
 	}
@@ -304,10 +315,10 @@ type placeJSON struct {
 	Lon   float64 `json:"lon"`
 }
 
-func (s *Service) handleNearby(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
-	q := r.URL.Query()
+func (s *Service) handleNearby(w http.ResponseWriter, r *http.Request, feed *gtfs.Feed) {
+	query := r.URL.Query()
 	radius := 500.0
-	if v := q.Get("radius"); v != "" {
+	if v := query.Get("radius"); v != "" {
 		var err error
 		if radius, err = strconv.ParseFloat(v, 64); err != nil || radius <= 0 || radius > 5000 {
 			writeError(w, http.StatusBadRequest, "radius must be 1 to 5000 meters")
@@ -315,7 +326,7 @@ func (s *Service) handleNearby(w http.ResponseWriter, r *http.Request, f *gtfs.F
 		}
 	}
 	var place geo.Place
-	switch addr := strings.TrimSpace(q.Get("address")); {
+	switch addr := strings.TrimSpace(query.Get("address")); {
 	case addr != "":
 		var err error
 		if place, err = s.geocode(r.Context(), addr); err != nil {
@@ -327,9 +338,9 @@ func (s *Service) handleNearby(w http.ResponseWriter, r *http.Request, f *gtfs.F
 			writeError(w, code, err.Error())
 			return
 		}
-	case q.Get("lat") != "" && q.Get("lon") != "":
-		lat, err1 := strconv.ParseFloat(q.Get("lat"), 64)
-		lon, err2 := strconv.ParseFloat(q.Get("lon"), 64)
+	case query.Get("lat") != "" && query.Get("lon") != "":
+		lat, err1 := strconv.ParseFloat(query.Get("lat"), 64)
+		lon, err2 := strconv.ParseFloat(query.Get("lon"), 64)
 		if err1 != nil || err2 != nil {
 			writeError(w, http.StatusBadRequest, "lat and lon must be numbers")
 			return
@@ -340,11 +351,11 @@ func (s *Service) handleNearby(w http.ResponseWriter, r *http.Request, f *gtfs.F
 		return
 	}
 	out := []stopJSON{}
-	for _, ns := range f.NearbyStops(place.Lat, place.Lon, radius, 20) {
-		sj := toStopJSON(f, ns.Stop)
-		m := float64(int(ns.Meters + 0.5))
-		sj.Meters = &m
-		out = append(out, sj)
+	for _, nearby := range feed.NearbyStops(place.Lat, place.Lon, radius, 20) {
+		entry := toStopJSON(feed, nearby.Stop)
+		meters := float64(int(nearby.Meters + 0.5))
+		entry.Meters = &meters
+		out = append(out, entry)
 	}
 	writeJSON(w, http.StatusOK, map[string]any{
 		"place": placeJSON{Label: place.Label, Lat: place.Lat, Lon: place.Lon},
@@ -360,14 +371,14 @@ func (s *Service) geocode(ctx context.Context, addr string) (geo.Place, error) {
 	}
 	s.geoMu.Lock()
 	defer s.geoMu.Unlock()
-	if wait := time.Second - time.Since(s.geoLast); wait > 0 {
+	if wait := time.Second - time.Since(s.lastGeocode); wait > 0 {
 		select {
 		case <-ctx.Done():
 			return geo.Place{}, ctx.Err()
 		case <-time.After(wait):
 		}
 	}
-	defer func() { s.geoLast = time.Now() }()
+	defer func() { s.lastGeocode = time.Now() }()
 	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
 	defer cancel()
 	return s.Geocoder.Geocode(ctx, addr)
@@ -411,34 +422,34 @@ func timePtr(t time.Time) *time.Time {
 }
 
 func (s *Service) handleStatus(w http.ResponseWriter, r *http.Request) {
-	st := statusJSON{Agency: s.Agency.ID}
-	if f := s.Feed(); f != nil {
-		st.Schedule = scheduleJSON{Loaded: true, Stops: len(f.Stops), Routes: len(f.Routes)}
+	status := statusJSON{Agency: s.Agency.ID}
+	if feed := s.Feed(); feed != nil {
+		status.Schedule = scheduleJSON{Loaded: true, Stops: len(feed.Stops), Routes: len(feed.Routes)}
 	}
 	s.mu.Lock()
-	st.Schedule.FileTime = timePtr(s.loadedMod)
+	status.Schedule.FileTime = timePtr(s.loadedMod)
 	if s.scheduleErr != nil {
-		st.Schedule.Error = s.scheduleErr.Error()
+		status.Schedule.Error = s.scheduleErr.Error()
 	}
-	rt := realtimeJSON{
+	realtimeStatus := realtimeJSON{
 		Polling:   s.polling,
 		Reason:    s.plan.Reason,
 		Watching:  len(s.watches),
 		FetchedAt: timePtr(s.fetchedAt),
 	}
 	if s.polling == "paused" {
-		rt.ResumeAt = timePtr(s.plan.WakeAt)
+		realtimeStatus.ResumeAt = timePtr(s.plan.WakeAt)
 	}
 	if s.snap != nil {
-		rt.FeedTime = timePtr(s.snap.FeedTime)
+		realtimeStatus.FeedTime = timePtr(s.snap.FeedTime)
 	}
 	if s.liveErr != nil {
-		rt.Error = s.liveErr.Error() // already free of the API key
+		realtimeStatus.Error = s.liveErr.Error() // already free of the API key
 	}
 	s.mu.Unlock()
 	if s.Fetcher != nil && s.Fetcher.Budget != nil {
-		rt.RequestsUsed, rt.RequestsStop = s.Fetcher.Budget.Used()
+		realtimeStatus.RequestsUsed, realtimeStatus.RequestsStop = s.Fetcher.Budget.Used()
 	}
-	st.Realtime = rt
-	writeJSON(w, http.StatusOK, st)
+	status.Realtime = realtimeStatus
+	writeJSON(w, http.StatusOK, status)
 }

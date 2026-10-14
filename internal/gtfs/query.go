@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/gtfs/query.go
+// Purpose: Schedule queries: next departures, stop search, nearby stops.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-12
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 package gtfs
 
 import (
@@ -34,82 +45,83 @@ type DirectionGroup struct {
 // horizon limits how far ahead we look; covers the overnight gap in service.
 const horizon = 12 * time.Hour
 
-// Next returns, for each route and direction serving stopID, the next n
-// departures at or after now. stopID may be a metro station, in which case
-// all of its platforms are included. If routes is non-empty, only those
+// Next returns, for each route and direction serving stopID, the next
+// limit departures at or after now. stopID may be a metro station, in which case
+// all of its platforms are included. If routeFilter is non-empty, only those
 // route IDs (or short names) are returned.
-func (f *Feed) Next(stopID string, now time.Time, n int, routes []string) []DirectionGroup {
-	now = now.In(f.Loc)
-	stopIDs := append([]string{stopID}, f.children[stopID]...)
-	want := map[int32]bool{}
-	for _, r := range routes {
-		if i, ok := f.routeByID[r]; ok {
-			want[i] = true
+func (f *Feed) Next(stopID string, now time.Time, limit int, routeFilter []string) []DirectionGroup {
+	now = now.In(f.TimeZone)
+	servedStopIDs := append([]string{stopID}, f.platformsByStation[stopID]...)
+	wantedRoutes := map[int32]bool{}
+	for _, name := range routeFilter {
+		if index, ok := f.routeIndexByID[name]; ok {
+			wantedRoutes[index] = true
 			continue
 		}
-		for i, rt := range f.Routes {
-			if rt.ShortName == r {
-				want[int32(i)] = true
+		for index, route := range f.Routes {
+			if route.ShortName == name {
+				wantedRoutes[int32(index)] = true
 			}
 		}
 	}
 
-	type key struct {
-		route int32
-		dir   int8
-		head  string // only used when direction is missing
+	type groupKey struct {
+		route     int32
+		direction int8
+		headsign  string // only used when direction is missing
 	}
-	groups := map[key][]Departure{}
-	until := now.Add(horizon)
+	departuresByGroup := map[groupKey][]Departure{}
+	horizonEnd := now.Add(horizon)
 
 	// A departure at 25:30 on yesterday's service is 01:30 today, so check
 	// yesterday; tomorrow covers late-evening queries.
-	for d := -1; d <= 1; d++ {
-		date := now.AddDate(0, 0, d)
-		active := f.activeServices(date)
-		base := serviceDayStart(date, f.Loc)
-		svcDate := date.Format("20060102")
-		for _, sid := range stopIDs {
-			for _, st := range f.byStop[sid] {
-				tr := f.trips[st.tripIdx]
-				if !active[tr.serviceID] || (len(routes) > 0 && !want[tr.routeIdx]) {
+	for dayOffset := -1; dayOffset <= 1; dayOffset++ {
+		serviceDay := now.AddDate(0, 0, dayOffset)
+		activeServices := f.activeServices(serviceDay)
+		dayStart := serviceDayStart(serviceDay, f.TimeZone)
+		serviceDate := serviceDay.Format("20060102")
+		for _, platformID := range servedStopIDs {
+			for _, visit := range f.stopTimesByStop[platformID] {
+				tripInfo := f.trips[visit.tripIndex]
+				if !activeServices[tripInfo.serviceID] || (len(routeFilter) > 0 && !wantedRoutes[tripInfo.routeIndex]) {
 					continue
 				}
-				k := key{route: tr.routeIdx, dir: tr.direction}
-				if tr.direction < 0 {
-					k.head = tr.headsign
+				key := groupKey{route: tripInfo.routeIndex, direction: tripInfo.direction}
+				if tripInfo.direction < 0 {
+					key.headsign = tripInfo.headsign
 				}
-				add := func(secs int32, freq bool) bool {
-					t := base.Add(time.Duration(secs) * time.Second)
-					if t.Before(now) {
+				addDeparture := func(seconds int32, fromFrequency bool) bool {
+					departs := dayStart.Add(time.Duration(seconds) * time.Second)
+					if departs.Before(now) {
 						return true
 					}
-					if t.After(until) {
+					if departs.After(horizonEnd) {
 						return false
 					}
-					groups[k] = append(groups[k], Departure{Time: t, TripID: f.tripIDs[st.tripIdx],
-						Headsign: tr.headsign, FromFrequency: freq, ServiceDate: svcDate,
-						StopID: sid, Sequence: st.sequence})
+					departuresByGroup[key] = append(departuresByGroup[key], Departure{Time: departs, TripID: f.tripIDs[visit.tripIndex],
+						Headsign: tripInfo.headsign, FromFrequency: fromFrequency, ServiceDate: serviceDate,
+						StopID: platformID, Sequence: visit.sequence})
 					return true
 				}
-				fr, isFreq := f.freqs[st.tripIdx]
-				if !isFreq {
-					add(st.departure, false)
+				windows, isFrequencyBased := f.frequenciesByTrip[visit.tripIndex]
+				if !isFrequencyBased {
+					addDeparture(visit.departure, false)
 					continue
 				}
-				// Expand headway-based trips: offset of this stop within the trip,
-				// repeated every headway across each window. Only the first n
-				// future occurrences per window can matter.
-				offset := st.departure - f.tripStart[st.tripIdx]
-				nowSecs := int32(now.Sub(base).Seconds()) - offset
-				for _, w := range fr {
-					start := w.start
-					if nowSecs > start {
-						skip := (nowSecs - start + w.headway - 1) / w.headway
-						start += skip * w.headway
+				// Expand headway-based trips: the trip's stop times are a
+				// template that repeats every headway across each window, so
+				// this stop is reached offsetInTrip after each run starts. Only
+				// the first limit future runs per window can matter.
+				offsetInTrip := visit.departure - f.tripFirstDeparture[visit.tripIndex]
+				nowInTemplate := int32(now.Sub(dayStart).Seconds()) - offsetInTrip
+				for _, window := range windows {
+					firstRun := window.start
+					if nowInTemplate > firstRun {
+						missedRuns := (nowInTemplate - firstRun + window.headway - 1) / window.headway
+						firstRun += missedRuns * window.headway
 					}
-					for i, t := 0, start; i < n && t < w.end; i, t = i+1, t+w.headway {
-						if !add(t+offset, true) {
+					for count, runStart := 0, firstRun; count < limit && runStart < window.end; count, runStart = count+1, runStart+window.headway {
+						if !addDeparture(runStart+offsetInTrip, true) {
 							break
 						}
 					}
@@ -118,41 +130,41 @@ func (f *Feed) Next(stopID string, now time.Time, n int, routes []string) []Dire
 		}
 	}
 
-	out := make([]DirectionGroup, 0, len(groups))
-	for k, deps := range groups {
-		sort.Slice(deps, func(i, j int) bool { return deps[i].Time.Before(deps[j].Time) })
-		deps = dedupe(deps)
-		if len(deps) > n {
-			deps = deps[:n]
+	result := make([]DirectionGroup, 0, len(departuresByGroup))
+	for key, departures := range departuresByGroup {
+		sort.Slice(departures, func(i, j int) bool { return departures[i].Time.Before(departures[j].Time) })
+		departures = dedupe(departures)
+		if len(departures) > limit {
+			departures = departures[:limit]
 		}
-		out = append(out, DirectionGroup{Route: f.Routes[k.route], Direction: int(k.dir),
-			Headsign: deps[0].Headsign, Departures: deps})
+		result = append(result, DirectionGroup{Route: f.Routes[key.route], Direction: int(key.direction),
+			Headsign: departures[0].Headsign, Departures: departures})
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Route.ShortName != out[j].Route.ShortName {
-			return lessRouteName(out[i].Route.ShortName, out[j].Route.ShortName)
+	sort.Slice(result, func(i, j int) bool {
+		if result[i].Route.ShortName != result[j].Route.ShortName {
+			return lessRouteName(result[i].Route.ShortName, result[j].Route.ShortName)
 		}
-		return out[i].Direction < out[j].Direction
+		return result[i].Direction < result[j].Direction
 	})
-	return out
+	return result
 }
 
 // dedupe drops repeats of the same trip at the same time, which happens when
 // a station and one of its platforms both list it. deps must be sorted.
-func dedupe(deps []Departure) []Departure {
-	type k struct {
+func dedupe(departures []Departure) []Departure {
+	type tripRun struct {
 		trip string
 		at   int64
 	}
-	seen := map[k]bool{}
-	out := deps[:0]
-	for _, d := range deps {
-		key := k{d.TripID, d.Time.Unix()}
-		if seen[key] {
+	seen := map[tripRun]bool{}
+	out := departures[:0]
+	for _, departure := range departures {
+		run := tripRun{departure.TripID, departure.Time.Unix()}
+		if seen[run] {
 			continue
 		}
-		seen[key] = true
-		out = append(out, d)
+		seen[run] = true
+		out = append(out, departure)
 	}
 	return out
 }
@@ -178,24 +190,24 @@ func isDigits(s string) bool {
 // serviceDayStart is GTFS's reference point for schedule times: noon minus
 // 12 hours on the service date. On DST change days this differs from
 // midnight, which keeps 08:00:00 meaning 8 a.m. local time.
-func serviceDayStart(d time.Time, loc *time.Location) time.Time {
-	y, m, day := d.Date()
-	return time.Date(y, m, day, 12, 0, 0, 0, loc).Add(-12 * time.Hour)
+func serviceDayStart(day time.Time, timeZone *time.Location) time.Time {
+	year, month, dayOfMonth := day.Date()
+	return time.Date(year, month, dayOfMonth, 12, 0, 0, 0, timeZone).Add(-12 * time.Hour)
 }
 
-func (f *Feed) activeServices(d time.Time) map[string]bool {
-	date := d.Format("20060102")
-	wd := d.Weekday()
+func (f *Feed) activeServices(day time.Time) map[string]bool {
+	dateKey := day.Format("20060102")
+	weekday := day.Weekday()
 	active := map[string]bool{}
-	for id, s := range f.services {
-		if s.days[wd] && date >= s.start && date <= s.end {
-			active[id] = true
+	for serviceID, calendar := range f.services {
+		if calendar.days[weekday] && dateKey >= calendar.start && dateKey <= calendar.end {
+			active[serviceID] = true
 		}
 	}
-	for id := range f.removed[date] {
+	for id := range f.servicesRemovedOn[dateKey] {
 		delete(active, id)
 	}
-	for id := range f.added[date] {
+	for id := range f.servicesAddedOn[dateKey] {
 		active[id] = true
 	}
 	return active
@@ -206,26 +218,26 @@ func (f *Feed) activeServices(d time.Time) map[string]bool {
 // stop code ("52345") also works. Platforms of a station are left out in
 // favour of the station itself.
 func (f *Feed) SearchStops(query string, limit int) []*Stop {
-	q := fold(query)
-	var out []*Stop
-	for _, s := range f.Stops {
-		if s.Parent != "" {
+	foldedQuery := foldAccents(query)
+	var matches []*Stop
+	for _, stop := range f.Stops {
+		if stop.Parent != "" {
 			continue
 		}
-		if s.Code == query || strings.Contains(fold(s.Name), q) {
-			out = append(out, s)
+		if stop.Code == query || strings.Contains(foldAccents(stop.Name), foldedQuery) {
+			matches = append(matches, stop)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].IsStation != out[j].IsStation {
-			return out[i].IsStation
+	sort.Slice(matches, func(i, j int) bool {
+		if matches[i].IsStation != matches[j].IsStation {
+			return matches[i].IsStation
 		}
-		return out[i].Name < out[j].Name
+		return matches[i].Name < matches[j].Name
 	})
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	if limit > 0 && len(matches) > limit {
+		matches = matches[:limit]
 	}
-	return out
+	return matches
 }
 
 // NearbyStop is a stop with its distance from a search point.
@@ -237,46 +249,46 @@ type NearbyStop struct {
 // NearbyStops returns stops and stations within radius meters of a point,
 // closest first. Metro platforms are folded into their station.
 func (f *Feed) NearbyStops(lat, lon, radius float64, limit int) []NearbyStop {
-	var out []NearbyStop
-	for _, s := range f.Stops {
-		if s.Parent != "" {
+	var nearby []NearbyStop
+	for _, stop := range f.Stops {
+		if stop.Parent != "" {
 			continue
 		}
-		if d := distance(lat, lon, s.Lat, s.Lon); d <= radius {
-			out = append(out, NearbyStop{s, d})
+		if meters := distance(lat, lon, stop.Lat, stop.Lon); meters <= radius {
+			nearby = append(nearby, NearbyStop{stop, meters})
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Meters < out[j].Meters })
-	if limit > 0 && len(out) > limit {
-		out = out[:limit]
+	sort.Slice(nearby, func(i, j int) bool { return nearby[i].Meters < nearby[j].Meters })
+	if limit > 0 && len(nearby) > limit {
+		nearby = nearby[:limit]
 	}
-	return out
+	return nearby
 }
 
 // distance is the great-circle distance in meters.
 func distance(lat1, lon1, lat2, lon2 float64) float64 {
-	const r = 6371000
-	rad := math.Pi / 180
-	dLat, dLon := (lat2-lat1)*rad, (lon2-lon1)*rad
-	a := math.Sin(dLat/2)*math.Sin(dLat/2) +
-		math.Cos(lat1*rad)*math.Cos(lat2*rad)*math.Sin(dLon/2)*math.Sin(dLon/2)
-	return 2 * r * math.Asin(math.Sqrt(a))
+	const earthRadiusMeters = 6371000
+	degreesToRadians := math.Pi / 180
+	dLat, dLon := (lat2-lat1)*degreesToRadians, (lon2-lon1)*degreesToRadians
+	haversine := math.Sin(dLat/2)*math.Sin(dLat/2) +
+		math.Cos(lat1*degreesToRadians)*math.Cos(lat2*degreesToRadians)*math.Sin(dLon/2)*math.Sin(dLon/2)
+	return 2 * earthRadiusMeters * math.Asin(math.Sqrt(haversine))
 }
 
 // RoutesAt lists the routes serving a stop or station, for the settings page.
 func (f *Feed) RoutesAt(stopID string) []Route {
-	seen := map[int32]bool{}
-	for _, sid := range append([]string{stopID}, f.children[stopID]...) {
-		for _, st := range f.byStop[sid] {
-			seen[f.trips[st.tripIdx].routeIdx] = true
+	routeIndexes := map[int32]bool{}
+	for _, platformID := range append([]string{stopID}, f.platformsByStation[stopID]...) {
+		for _, visit := range f.stopTimesByStop[platformID] {
+			routeIndexes[f.trips[visit.tripIndex].routeIndex] = true
 		}
 	}
-	out := make([]Route, 0, len(seen))
-	for i := range seen {
-		out = append(out, f.Routes[i])
+	routes := make([]Route, 0, len(routeIndexes))
+	for i := range routeIndexes {
+		routes = append(routes, f.Routes[i])
 	}
-	sort.Slice(out, func(i, j int) bool { return lessRouteName(out[i].ShortName, out[j].ShortName) })
-	return out
+	sort.Slice(routes, func(i, j int) bool { return lessRouteName(routes[i].ShortName, routes[j].ShortName) })
+	return routes
 }
 
 var accentFolder = strings.NewReplacer(
@@ -285,4 +297,4 @@ var accentFolder = strings.NewReplacer(
 	"œ", "oe", "æ", "ae",
 )
 
-func fold(s string) string { return accentFolder.Replace(strings.ToLower(s)) }
+func foldAccents(text string) string { return accentFolder.Replace(strings.ToLower(text)) }

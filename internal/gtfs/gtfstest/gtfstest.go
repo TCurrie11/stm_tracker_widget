@@ -1,3 +1,14 @@
+// stm_tracker_widget: live STM bus and métro departures for KDE Plasma 6
+// https://github.com/TCurrie11/stm_tracker_widget
+//
+// File:    internal/gtfs/gtfstest/gtfstest.go
+// Purpose: A small STM-shaped GTFS feed for tests.
+// Author:  TCurrie11 (https://github.com/TCurrie11)
+// Version: 0.1.0
+// Created: 2026-10-14
+// Updated: 2026-10-14
+// License: GPL-2.0-or-later
+
 // Package gtfstest provides a small GTFS feed for tests, shaped like STM's.
 //
 // Monday 2026-10-12 is a normal weekday; Tuesday 2026-10-13 has its weekday
@@ -66,9 +77,9 @@ O-S,05:30:00,10:00:00,240
 // Zip returns Files packed as a GTFS zip.
 func Zip() []byte {
 	var buf bytes.Buffer
-	zw := zip.NewWriter(&buf)
+	zipWriter := zip.NewWriter(&buf)
 	for name, body := range Files {
-		w, err := zw.Create(name)
+		w, err := zipWriter.Create(name)
 		if err != nil {
 			panic(err)
 		}
@@ -76,7 +87,7 @@ func Zip() []byte {
 			panic(err)
 		}
 	}
-	if err := zw.Close(); err != nil {
+	if err := zipWriter.Close(); err != nil {
 		panic(err)
 	}
 	return buf.Bytes()
