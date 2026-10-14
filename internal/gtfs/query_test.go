@@ -88,6 +88,11 @@ func TestPastMidnightTrip(t *testing.T) {
 	if day := g[0].Departures[0].Time.Day(); day != 13 {
 		t.Errorf("want Oct 13, got day %d", day)
 	}
+	// It belongs to Monday's service, which is what realtime feeds use as
+	// its start_date.
+	if d := g[0].Departures[0]; d.ServiceDate != "20261012" || d.StopID != "52345" || d.Sequence != 10 {
+		t.Errorf("got service date %s, stop %s, seq %d", d.ServiceDate, d.StopID, d.Sequence)
+	}
 }
 
 func TestCancelledDay(t *testing.T) {

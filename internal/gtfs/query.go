@@ -10,8 +10,14 @@ import (
 // Departure is one scheduled departure from a stop.
 type Departure struct {
 	Time     time.Time
-	TripID   string // used later to match GTFS-Realtime updates
+	TripID   string // matches GTFS-Realtime updates
 	Headsign string
+	// ServiceDate (YYYYMMDD) is the schedule day the trip belongs to, which
+	// for after-midnight trips is the previous calendar day. Together with
+	// TripID it identifies one run of a trip, as GTFS-Realtime's start_date does.
+	ServiceDate string
+	StopID      string // the platform/stop the departure is from
+	Sequence    int32  // stop_sequence within the trip
 	// FromFrequency is true for headway-based trips (the metro): the time
 	// is "a train roughly every N minutes", not a specific vehicle.
 	FromFrequency bool
@@ -62,6 +68,7 @@ func (f *Feed) Next(stopID string, now time.Time, n int, routes []string) []Dire
 		date := now.AddDate(0, 0, d)
 		active := f.activeServices(date)
 		base := serviceDayStart(date, f.Loc)
+		svcDate := date.Format("20060102")
 		for _, sid := range stopIDs {
 			for _, st := range f.byStop[sid] {
 				tr := f.trips[st.tripIdx]
@@ -81,7 +88,8 @@ func (f *Feed) Next(stopID string, now time.Time, n int, routes []string) []Dire
 						return false
 					}
 					groups[k] = append(groups[k], Departure{Time: t, TripID: f.tripIDs[st.tripIdx],
-						Headsign: tr.headsign, FromFrequency: freq})
+						Headsign: tr.headsign, FromFrequency: freq, ServiceDate: svcDate,
+						StopID: sid, Sequence: st.sequence})
 					return true
 				}
 				fr, isFreq := f.freqs[st.tripIdx]
