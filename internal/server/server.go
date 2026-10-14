@@ -330,10 +330,13 @@ func (s *Service) freshFor() time.Duration {
 // Live is what the widget needs to know about live data for one response.
 type Live struct {
 	Snapshot *realtime.Snapshot // nil = schedule only
-	Note     string             // why live data is missing, for the widget
+	// Reason says why Snapshot is nil, as a code the widget can act on:
+	// no_feed, no_key, unauthorized, budget, error, no_service, starting.
+	Reason string
+	Note   string // the same in words, for logs and debugging
 }
 
-// live returns the snapshot to use now, or a short reason there is none.
+// live returns the snapshot to use now, or the reason there is none.
 func (s *Service) live(now time.Time) Live {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -342,25 +345,26 @@ func (s *Service) live(now time.Time) Live {
 	}
 	switch {
 	case s.Fetcher == nil || s.Agency.TripUpdatesURL == "":
-		return Live{Note: "no live data for this agency"}
+		return Live{Reason: "no_feed", Note: "no live data for this agency"}
 	case s.liveErr != nil:
-		return Live{Note: describe(s.liveErr)}
+		reason, note := describe(s.liveErr)
+		return Live{Reason: reason, Note: note}
 	case s.polling == "paused":
-		return Live{Note: s.plan.Reason}
+		return Live{Reason: "no_service", Note: s.plan.Reason}
 	}
-	return Live{Note: "waiting for live data"}
+	return Live{Reason: "starting", Note: "waiting for live data"}
 }
 
-// describe turns a fetch error into something short enough for the widget.
-// The full error is in the log.
-func describe(err error) string {
+// describe turns a fetch error into a reason code and a short note. The
+// full error is in the log.
+func describe(err error) (reason, note string) {
 	switch {
 	case errors.Is(err, realtime.ErrNoKey):
-		return "no API key configured"
+		return "no_key", "no API key configured"
 	case errors.Is(err, realtime.ErrUnauthorized):
-		return "API key rejected"
+		return "unauthorized", "API key rejected"
 	case errors.Is(err, realtime.ErrBudgetExhausted):
-		return "daily request limit reached"
+		return "budget", "daily request limit reached"
 	}
-	return "live data unavailable"
+	return "error", "live data unavailable"
 }

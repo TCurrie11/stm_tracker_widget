@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -22,6 +23,8 @@ import (
 //	GET /v1/stops?q=berri                           stops by name or code
 //	GET /v1/stops/nearby?address=…&radius=500       stops near an address
 //	GET /v1/stops/nearby?lat=…&lon=…                stops near a point
+//	GET /v1/stops/{id}                              one stop with its routes
+//	GET /v1/stations                                stations (STM: the métro), by name
 //	GET /v1/status                                  service health, for the widget and for debugging
 //
 // Errors are JSON too: {"error": "..."}.
@@ -31,6 +34,8 @@ func (s *Service) Handler() http.Handler {
 	mux.HandleFunc("GET /v1/departures", s.needFeed(s.handleDepartures))
 	mux.HandleFunc("GET /v1/stops", s.needFeed(s.handleSearch))
 	mux.HandleFunc("GET /v1/stops/nearby", s.needFeed(s.handleNearby))
+	mux.HandleFunc("GET /v1/stops/{id}", s.needFeed(s.handleStop))
+	mux.HandleFunc("GET /v1/stations", s.needFeed(s.handleStations))
 	mux.HandleFunc("GET /v1/status", s.handleStatus)
 	return localOnly(mux)
 }
@@ -92,9 +97,10 @@ type departuresResponse struct {
 }
 
 type liveJSON struct {
-	// "live" when realtime data was applied, "schedule" otherwise; Note
-	// then says why ("no service until 05:30", "API key rejected", ...).
+	// "live" when realtime data was applied, "schedule" otherwise; Reason
+	// then says why as a code (see Live.Reason), Note in words.
 	State    string     `json:"state"`
+	Reason   string     `json:"reason,omitempty"`
 	FeedTime *time.Time `json:"feed_time,omitempty"`
 	Note     string     `json:"note,omitempty"`
 }
@@ -157,7 +163,7 @@ func (s *Service) handleDepartures(w http.ResponseWriter, r *http.Request, f *gt
 	resp := departuresResponse{
 		Stop:    toStopJSON(f, stop),
 		Now:     now.In(f.Loc),
-		Live:    liveJSON{State: "schedule", Note: live.Note},
+		Live:    liveJSON{State: "schedule", Reason: live.Reason, Note: live.Note},
 		Routes:  []groupJSON{},
 		Credits: credits(s.Agency.Name),
 	}
@@ -264,6 +270,32 @@ func (s *Service) handleSearch(w http.ResponseWriter, r *http.Request, f *gtfs.F
 		out = append(out, toStopJSON(f, st))
 	}
 	writeJSON(w, http.StatusOK, map[string]any{"stops": out})
+}
+
+// handleStop is for the settings page: it lists a saved stop's routes
+// without counting as the widget watching it.
+func (s *Service) handleStop(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
+	st, ok := f.Stops[r.PathValue("id")]
+	if !ok {
+		writeError(w, http.StatusNotFound, "no stop with ID "+strconv.Quote(r.PathValue("id")))
+		return
+	}
+	writeJSON(w, http.StatusOK, toStopJSON(f, st))
+}
+
+// handleStations lists parent stations, which in STM's feed are exactly
+// the métro stations; the widget offers them as a "home station" list.
+func (s *Service) handleStations(w http.ResponseWriter, r *http.Request, f *gtfs.Feed) {
+	out := []stopJSON{}
+	for _, st := range f.Stops {
+		if st.IsStation {
+			if sj := toStopJSON(f, st); len(sj.Routes) > 0 {
+				out = append(out, sj)
+			}
+		}
+	}
+	slices.SortFunc(out, func(a, b stopJSON) int { return strings.Compare(a.Name, b.Name) })
+	writeJSON(w, http.StatusOK, map[string]any{"stations": out})
 }
 
 type placeJSON struct {

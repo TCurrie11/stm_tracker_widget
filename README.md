@@ -7,7 +7,8 @@ Two parts:
 
 - **`transitd`** — a small Go service that reads STM's schedule (GTFS) and
   real-time feeds (GTFS-Realtime) and serves simple JSON on localhost.
-- **the plasmoid** — QML that displays that JSON. *(coming)*
+- **the plasmoid** (`package/`) — plain QML that displays that JSON. No
+  transit logic, no C++ plugin.
 
 ## Status
 
@@ -23,7 +24,9 @@ Two parts:
       API key kept out of logs
 - [x] HTTP API on localhost (`transitd serve`): departures, stop search,
       nearby stops, status; downloads and refreshes the schedule itself
-- [ ] Plasmoid
+- [x] Plasmoid: panel view (next departure of your top route), full view
+      per stop, settings page with address search
+- [ ] Screenshots
 
 ## Try it
 
@@ -66,6 +69,8 @@ schedule is still loading). Times are ISO 8601 with the agency's offset.
 | `GET /v1/departures?stop=ID&routes=24,165&n=3` | the board: next `n` per route and direction |
 | `GET /v1/stops?q=berri` | stops and stations by name or sign number |
 | `GET /v1/stops/nearby?address=1500 rue Berri&radius=500` | stops near an address (or `lat=&lon=`) |
+| `GET /v1/stops/{id}` | one stop and its routes |
+| `GET /v1/stations` | métro stations |
 | `GET /v1/status` | schedule, polling state, last error, requests used today |
 
 A departure looks like:
@@ -89,8 +94,26 @@ A departure looks like:
 `skipped` (detour). `frequency` marks metro times, which are "a train about
 every N minutes". `stops_away` is null when unknown; `occupancy` is 0
 (unknown) to 3 (standing room). The response's `live.state` is `live` or
-`schedule`, and `live.note` says why live data is missing ("no service
-until 05:30", "API key rejected"). The widget must show `credits`.
+`schedule`; then `live.reason` says why as a code (`no_key`,
+`unauthorized`, `budget`, `error`, `no_service`, `starting`, `no_feed`) and
+`live.note` in words ("no service until 05:30"). The widget must show `credits`.
+
+## Installing the widget
+
+With `transitd` running (above):
+
+```sh
+kpackagetool6 -t Plasma/Applet -i package/     # first time; -u package/ to update
+```
+
+Then right-click the desktop or a panel → Add Widgets → "STM Transit", and
+open its settings to find your stops by address. The first stop's first
+ticked route is the one the panel shows.
+
+Developing: `sudo dnf install plasma-sdk`, then
+`plasmoidviewer -a io.github.tcurrie11.stmtransit` runs it in a window with
+`console.log`/`console.warn` output in the terminal (add
+`-c org.kde.panel -l topedge -f horizontal` to try it in a panel).
 
 ## Configuration
 

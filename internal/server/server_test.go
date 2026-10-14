@@ -212,6 +212,30 @@ func TestStopSearch(t *testing.T) {
 	}
 }
 
+func TestStopByID(t *testing.T) {
+	s, _ := newService(t, "07:55")
+	var st stopJSON
+	if code := get(t, s, "/v1/stops/52345", &st); code != 200 || len(st.Routes) != 1 || st.Routes[0].ShortName != "24" {
+		t.Errorf("%d %+v", code, st)
+	}
+	if code := get(t, s, "/v1/stops/nope", nil); code != 404 {
+		t.Errorf("unknown stop: %d", code)
+	}
+	if len(s.watches) != 0 {
+		t.Error("looking up a stop should not start polling for it")
+	}
+}
+
+func TestStations(t *testing.T) {
+	s, _ := newService(t, "07:55")
+	var resp struct{ Stations []stopJSON }
+	get(t, s, "/v1/stations", &resp)
+	// CV is a station with no service in the fixture, so it is left out.
+	if len(resp.Stations) != 1 || resp.Stations[0].ID != "STATION-BERRI" || resp.Stations[0].Routes[0].Mode != "metro" {
+		t.Errorf("got %+v", resp.Stations)
+	}
+}
+
 func TestPollingFollowsWidget(t *testing.T) {
 	s, c := newService(t, "07:55")
 	hits, _ := withRealtime(t, s)
@@ -224,7 +248,7 @@ func TestPollingFollowsWidget(t *testing.T) {
 
 	var resp departuresResponse
 	get(t, s, "/v1/departures?stop=52345&routes=24", &resp)
-	if resp.Live.State != "schedule" || resp.Live.Note != "waiting for live data" {
+	if resp.Live.State != "schedule" || resp.Live.Reason != "starting" {
 		t.Errorf("first response live %+v", resp.Live)
 	}
 	select {
@@ -273,7 +297,7 @@ func TestPausedOvernight(t *testing.T) {
 		t.Fatalf("%d fetches, polling %s", hits.Load(), s.polling)
 	}
 	get(t, s, "/v1/departures?stop=52345&routes=24", &resp)
-	if resp.Live.Note != "no service until 08:00" {
+	if resp.Live.Reason != "no_service" || resp.Live.Note != "no service until 08:00" {
 		t.Errorf("note %q", resp.Live.Note)
 	}
 	var st statusJSON
@@ -291,7 +315,7 @@ func TestRejectedKeyIsExplained(t *testing.T) {
 	get(t, s, "/v1/departures?stop=52345&routes=24", &resp)
 	s.step(context.Background())
 	get(t, s, "/v1/departures?stop=52345&routes=24", &resp)
-	if resp.Live.State != "schedule" || resp.Live.Note != "API key rejected" {
+	if resp.Live.State != "schedule" || resp.Live.Reason != "unauthorized" {
 		t.Errorf("live %+v", resp.Live)
 	}
 	var st statusJSON
