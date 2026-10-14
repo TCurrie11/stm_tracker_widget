@@ -1,2 +1,3 @@
-transitd
+# built binary (root only, not cmd/transitd/)
+/transitd
 *.zip
