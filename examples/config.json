@@ -10,9 +10,9 @@
       "name": "Société de transport de Montréal",
       "timezone": "America/Montreal",
       "gtfs_url": "https://www.stm.info/sites/default/files/gtfs/gtfs_stm.zip",
-      "trip_updates_url": "FILL IN FROM THE STM DEVELOPER PORTAL",
-      "vehicle_positions_url": "FILL IN FROM THE STM DEVELOPER PORTAL",
-      "api_key_header": "FILL IN (header name from the portal docs)",
+      "trip_updates_url": "https://api.stm.info/pub/od/gtfs-rt/ic/v2/tripUpdates",
+      "vehicle_positions_url": "https://api.stm.info/pub/od/gtfs-rt/ic/v2/vehiclePositions",
+      "api_key_header": "apikey",
       "api_key_env": "STM_API_KEY",
       "daily_request_limit": 10000
     }
